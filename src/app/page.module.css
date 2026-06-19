@@ -1,0 +1,387 @@
+.dashboardContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Welcome Banner */
+.welcomeBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(23, 32, 51, 0.4) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 24px;
+}
+
+.greeting {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.subGreeting {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.dateBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  padding: 8px 14px;
+  border-radius: var(--border-radius-sm);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* KPI Grid */
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+/* Charts Grid */
+.chartsGrid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
+}
+
+.chartCard {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chartHeader {
+  margin-bottom: 20px;
+}
+
+.chartHeader h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.chartSub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.chartWrapper {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.svgChart {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* Priority Allocation (Donut Chart) */
+.donutContainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  flex: 1;
+  gap: 16px;
+}
+
+.svgDonut {
+  filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.1));
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  font-size: 0.825rem;
+  color: var(--text-secondary);
+  gap: 10px;
+  min-width: 100px;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.highDot { background-color: var(--priority-high); box-shadow: 0 0 6px var(--priority-high); }
+.mediumDot { background-color: var(--priority-medium); box-shadow: 0 0 6px var(--priority-medium); }
+.lowDot { background-color: var(--priority-low); box-shadow: 0 0 6px var(--priority-low); }
+
+.legendLabel {
+  flex: 1;
+}
+
+.legendVal {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Actionables Grid */
+.actionablesGrid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 24px;
+}
+
+.actionableCard {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.actionableHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.actionableHeader h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.viewAllLink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary);
+  transition: var(--transition-fast);
+}
+
+.viewAllLink:hover {
+  color: var(--secondary);
+}
+
+.actionableList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+/* Critical Tasks Row */
+.urgentTaskRow {
+  padding: 14px;
+  background-color: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  transition: var(--transition-fast);
+}
+
+.urgentTaskRow:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.urgentHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dueDate {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.urgentTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 10px 0;
+}
+
+.urgentMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.projectTag {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background-color: rgba(255, 255, 255, 0.03);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.miniAssignee {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.miniAvatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Team Resource Allocation List */
+.teamWorkloadList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workloadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background-color: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+}
+
+.memberProfile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.memberAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.memberDetails {
+  display: flex;
+  flex-direction: column;
+}
+
+.memberName {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.memberRole {
+  font-size: 0.725rem;
+  color: var(--text-muted);
+}
+
+.memberWorkloadStats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.progressContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progressBar {
+  width: 80px;
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 3px;
+}
+
+.progressText {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.taskCount {
+  font-size: 0.725rem;
+  color: var(--text-muted);
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.emptyIcon {
+  color: var(--status-done);
+  opacity: 0.6;
+}
+
+/* Tooltip group hover effects */
+.tooltipGroup:hover circle {
+  fill: var(--primary);
+  r: 5px;
+}
+
+.hoverCircle:hover {
+  opacity: 0.15;
+}
+
+@media (max-width: 1024px) {
+  .chartsGrid {
+    grid-template-columns: 1fr;
+  }
+  .actionablesGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .welcomeBanner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpiGrid {
+    grid-template-columns: 1fr;
+  }
+}

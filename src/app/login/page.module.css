@@ -1,0 +1,516 @@
+.loginPage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.92fr) minmax(320px, 440px);
+  gap: 28px;
+  min-height: 100vh;
+  padding: 48px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.gridGlow {
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 18% 18%, rgba(16, 185, 129, 0.18), transparent 32%),
+    radial-gradient(circle at 84% 72%, rgba(59, 130, 246, 0.16), transparent 34%),
+    linear-gradient(135deg, rgba(15, 22, 36, 0.6), rgba(8, 12, 20, 0.92));
+  background-size: 42px 42px, 42px 42px, auto, auto, auto;
+  border-radius: var(--border-radius-lg);
+}
+
+.orbitOne,
+.orbitTwo {
+  position: absolute;
+  width: 340px;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 50%;
+  z-index: -2;
+  animation: spinOrbit 18s linear infinite;
+}
+
+.orbitOne {
+  top: 7%;
+  left: 10%;
+}
+
+.orbitTwo {
+  right: 5%;
+  bottom: 2%;
+  width: 240px;
+  animation-duration: 24s;
+  animation-direction: reverse;
+}
+
+.orbitOne::before,
+.orbitTwo::before {
+  content: '';
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--status-done);
+  box-shadow: 0 0 24px var(--status-done);
+}
+
+.orbitTwo::before {
+  background: var(--status-review);
+  box-shadow: 0 0 24px var(--status-review);
+}
+
+.visualPanel {
+  position: relative;
+  min-height: 620px;
+  padding: 34px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent 28%),
+    linear-gradient(315deg, rgba(245, 158, 11, 0.09), transparent 26%),
+    rgba(15, 22, 36, 0.64);
+  box-shadow: var(--glass-shadow);
+  overflow: hidden;
+}
+
+.brandLock {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-md);
+  background: rgba(8, 12, 20, 0.58);
+  backdrop-filter: blur(12px);
+}
+
+.brandIcon,
+.headerIcon {
+  display: grid;
+  place-items: center;
+  color: white;
+  background: linear-gradient(135deg, var(--status-done), var(--status-review));
+  box-shadow: 0 0 26px rgba(16, 185, 129, 0.25);
+}
+
+.brandIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+.brandLock span,
+.cardHeader span,
+.fieldGroup span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.brandLock strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 1.02rem;
+}
+
+.signalStack {
+  position: absolute;
+  right: 30px;
+  bottom: 32px;
+  display: grid;
+  gap: 12px;
+  width: min(290px, calc(100% - 60px));
+}
+
+.signalCard {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--border-radius-md);
+  background: rgba(8, 12, 20, 0.64);
+  backdrop-filter: blur(16px);
+  animation: floatCard 4s ease-in-out infinite;
+}
+
+.signalCard:nth-child(2) {
+  animation-delay: -1.1s;
+}
+
+.signalCard:nth-child(3) {
+  animation-delay: -2.2s;
+}
+
+.signalCard p {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.signalCard strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.signalDot,
+.signalDotAlt,
+.signalDotHot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.signalDot {
+  background: var(--status-done);
+  box-shadow: 0 0 16px var(--status-done);
+}
+
+.signalDotAlt {
+  background: var(--status-review);
+  box-shadow: 0 0 16px var(--status-review);
+}
+
+.signalDotHot {
+  background: var(--status-inprogress);
+  box-shadow: 0 0 16px var(--status-inprogress);
+}
+
+.motionCore {
+  position: absolute;
+  top: 50%;
+  left: 44%;
+  display: grid;
+  place-items: center;
+  width: 230px;
+  height: 230px;
+  color: var(--text-primary);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(16, 185, 129, 0.2), transparent 32%),
+    radial-gradient(circle, rgba(59, 130, 246, 0.18), transparent 62%);
+  transform: translate(-50%, -50%);
+}
+
+.energyOrb {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  color: white;
+  background: linear-gradient(135deg, var(--status-done), var(--status-review));
+  box-shadow:
+    0 0 28px rgba(16, 185, 129, 0.32),
+    0 0 72px rgba(59, 130, 246, 0.16);
+  animation: energyFloat 3.2s ease-in-out infinite;
+}
+
+.motionTrailOne,
+.motionTrailTwo,
+.motionTrailThree {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+}
+
+.motionTrailOne {
+  inset: 30px;
+  animation: rippleOrbit 3s ease-out infinite;
+}
+
+.motionTrailTwo {
+  inset: 4px;
+  border-top-color: rgba(16, 185, 129, 0.54);
+  border-right-color: transparent;
+  animation: spinOrbit 8s linear infinite;
+}
+
+.motionTrailThree {
+  inset: 58px;
+  border-bottom-color: rgba(245, 158, 11, 0.48);
+  border-left-color: transparent;
+  animation: spinOrbit 5.5s linear infinite reverse;
+}
+
+.loginCard {
+  align-self: center;
+  width: 100%;
+  padding: 34px;
+  border-radius: var(--border-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
+    rgba(23, 32, 51, 0.74);
+  animation: riseIn 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.headerIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.loginCard h1 {
+  color: var(--text-primary);
+  font-size: clamp(2rem, 4vw, 3.15rem);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.subtitle {
+  margin-top: 14px;
+  color: var(--text-secondary);
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.loginForm {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.fieldGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.inputShell {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  background: rgba(8, 12, 20, 0.55);
+  color: var(--text-secondary);
+  transition: var(--transition-normal);
+}
+
+.inputShell:focus-within {
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.08);
+  color: var(--text-primary);
+}
+
+.inputShell input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.98rem;
+}
+
+.inputShell input::placeholder {
+  color: var(--text-muted);
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  transition: var(--transition-fast);
+}
+
+.iconButton:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+.strengthMeter {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.strengthMeter span {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  transition: var(--transition-normal);
+}
+
+.strengthMeter .strengthOn {
+  background: linear-gradient(90deg, var(--status-done), var(--status-review));
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.24);
+}
+
+.errorMessage,
+.successMessage {
+  min-height: 20px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.errorMessage {
+  color: var(--priority-high);
+}
+
+.successMessage {
+  color: var(--status-done);
+}
+
+.submitButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 18px;
+  border-radius: var(--border-radius-md);
+  color: white;
+  background: linear-gradient(135deg, var(--status-done), var(--status-review));
+  box-shadow: 0 18px 35px rgba(16, 185, 129, 0.18);
+  font-size: 0.98rem;
+  font-weight: 800;
+  transition: var(--transition-normal);
+}
+
+.submitButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 42px rgba(59, 130, 246, 0.25);
+}
+
+.resetButton {
+  margin-top: 18px;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 700;
+  transition: var(--transition-fast);
+}
+
+.resetButton:hover {
+  color: var(--text-primary);
+}
+
+@keyframes spinOrbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes floatCard {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes rippleOrbit {
+  0% {
+    opacity: 0.78;
+    transform: scale(0.68);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.28);
+  }
+}
+
+@keyframes energyFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(8deg);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 1120px) {
+  .loginPage {
+    grid-template-columns: 1fr;
+    padding: 28px;
+  }
+
+  .visualPanel {
+    min-height: 380px;
+  }
+
+  .pulseCore {
+    left: 50%;
+  }
+}
+
+@media (max-width: 768px) {
+  .loginPage {
+    min-height: 100vh;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .visualPanel {
+    min-height: 310px;
+    padding: 18px;
+  }
+
+  .signalStack {
+    right: 18px;
+    bottom: 18px;
+    width: calc(100% - 36px);
+  }
+
+  .motionCore {
+    top: 43%;
+    width: 160px;
+    height: 160px;
+  }
+
+  .loginCard {
+    padding: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbitOne,
+  .orbitTwo,
+  .signalCard,
+  .motionCore span,
+  .energyOrb,
+  .loginCard {
+    animation: none;
+  }
+}

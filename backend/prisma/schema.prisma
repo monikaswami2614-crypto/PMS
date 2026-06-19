@@ -1,0 +1,226 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String          @id @default(cuid())
+  name          String
+  email         String          @unique
+  password      String
+  role          String
+  avatarUrl     String?
+  status        String          @default("active")
+  tasks         Task[]
+  ownedProjects Project[]       @relation("ProjectOwner")
+  memberships   ProjectMember[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Project {
+  id                             String                          @id @default(cuid())
+  name                           String
+  description                    String?
+  category                       String?
+  rootPath                       String?                         @unique
+  status                         String                          @default("active")
+  checklistStage                 String                          @default("START_HERE")
+  startDate                      DateTime
+  endDate                        DateTime?
+  ownerId                        String?
+  owner                          User?                           @relation(fields: [ownerId], references: [id], name: "ProjectOwner")
+  members                        ProjectMember[]
+  folders                        Folder[]
+  files                          File[]
+  tasks                          Task[]
+  validationLogs                 ValidationLog[]
+  checklistStatuses              ProjectChecklistStatus[]
+  certificationValidationResults CertificationValidationResult[]
+  certificationStatuses          ProjectCertificationStatus[]
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+}
+
+model ProjectMember {
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String
+  user      User    @relation(fields: [userId], references: [id])
+  userId    String
+
+  @@id([projectId, userId])
+}
+
+model Folder {
+  id             String          @id @default(cuid())
+  name           String
+  path           String
+  relativePath   String
+  project        Project         @relation(fields: [projectId], references: [id])
+  projectId      String
+  parent         Folder?         @relation("FolderHierarchy", fields: [parentId], references: [id])
+  parentId       String?
+  children       Folder[]        @relation("FolderHierarchy")
+  files          File[]
+  validationLogs ValidationLog[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model File {
+  id             String          @id @default(cuid())
+  name           String
+  path           String
+  relativePath   String
+  extension      String?
+  size           Int
+  modifiedAt     DateTime
+  project        Project         @relation(fields: [projectId], references: [id])
+  projectId      String
+  folder         Folder?         @relation(fields: [folderId], references: [id])
+  folderId       String?
+  validationLogs ValidationLog[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model ValidationLog {
+  id        String          @id @default(cuid())
+  project   Project         @relation(fields: [projectId], references: [id])
+  projectId String
+  folder    Folder?         @relation(fields: [folderId], references: [id])
+  folderId  String?
+  file      File?           @relation(fields: [fileId], references: [id])
+  fileId    String?
+  type      ValidationType
+  level     ValidationLevel
+  message   String
+  extra     Json?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model ProjectChecklistStatus {
+  id                        String                     @id @default(cuid())
+  project                   Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId                 String
+  checklistItem             CertificationChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  checklistItemId           String
+  preCertificationChecked   Boolean?
+  finalCertificationChecked Boolean?
+  preCertificationStatus    String?
+  finalCertificationStatus  String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+
+  @@unique([projectId, checklistItemId])
+}
+
+model CertificationChecklistItem {
+  id                       String                          @id
+  checklistType            ChecklistType
+  creditCode               String
+  creditName               String?
+  requirementName          String
+  documentName             String
+  keywords                 Json
+  points                   Int                             @default(0)
+  phase                    CertificationPhase
+  sourceSheet              String?
+  sourceRow                Int?
+  validationResults        CertificationValidationResult[]
+  projectChecklistStatuses ProjectChecklistStatus[]
+  createdAt                DateTime                        @default(now())
+  updatedAt                DateTime                        @updatedAt
+}
+
+model CertificationValidationResult {
+  id                  String                     @id
+  project             Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId           String
+  checklistItem       CertificationChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  checklistItemId     String
+  matchedFileId       String?
+  phase               CertificationPhase
+  status              DocumentValidationStatus
+  matchScore          Int                        @default(0)
+  matchedText         String?
+  missingDocumentName String?
+  pointsAtRisk        Int                        @default(0)
+  validatedAt         DateTime                   @default(now())
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+}
+
+model ProjectCertificationStatus {
+  id                String              @id
+  project           Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId         String
+  checklistType     ChecklistType
+  phase             CertificationPhase
+  status            CertificationStatus
+  completionPercent Int
+  totalDocuments    Int
+  matchedDocuments  Int
+  missingDocuments  Int
+  pointsAtRisk      Int
+  validatedAt       DateTime            @default(now())
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model Task {
+  id             String    @id @default(cuid())
+  title          String
+  description    String?
+  status         String    @default("todo")
+  priority       String    @default("medium")
+  startDate      DateTime?
+  dueDate        DateTime
+  assignee       User?     @relation(fields: [assigneeId], references: [id])
+  assigneeId     String?
+  project        Project?  @relation(fields: [projectId], references: [id])
+  projectId      String?
+  subtasks       Json?
+  estimatedHours Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+enum ValidationType {
+  MISSING_FILE
+  EMPTY_FOLDER
+  ZERO_BYTE_FILE
+  METADATA_ISSUE
+}
+
+enum ValidationLevel {
+  INFO
+  WARNING
+  ERROR
+}
+
+enum ChecklistType {
+  NB
+  GH
+}
+
+enum CertificationPhase {
+  PRE
+  FINAL
+  BOTH
+}
+
+enum CertificationStatus {
+  COMPLETED
+  PENDING
+}
+
+enum DocumentValidationStatus {
+  MATCHED
+  MISSING
+}

@@ -1,0 +1,80 @@
+.card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 120px;
+  position: relative;
+  overflow: hidden;
+  transition: var(--transition-normal);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--card-glow-color);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.08);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.iconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--border-radius-sm);
+  transition: var(--transition-normal);
+}
+
+.content {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.trend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.positive {
+  color: var(--status-done);
+  background-color: rgba(16, 185, 129, 0.1);
+}
+
+.negative {
+  color: var(--priority-high);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.trendLabel {
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 2px;
+}
