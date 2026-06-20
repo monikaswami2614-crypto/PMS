@@ -94,7 +94,7 @@
 }
 
 .searchInput {
-  background: var(--input-bg, rgba(15, 22, 38, 0.6));
+  background: var(--input-bg, rgba(var(--surface-rgb), 0.6));
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   padding: 8px 12px 8px 36px;
@@ -107,7 +107,7 @@
 
 .searchInput:focus {
   border-color: var(--primary);
-  background: var(--input-bg-focus, rgba(15, 22, 38, 0.9));
+  background: var(--input-bg-focus, rgba(var(--surface-rgb), 0.9));
   width: 260px;
   box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
 }
@@ -141,14 +141,14 @@
   border-radius: var(--border-radius-sm);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--contrast-surface-rgb), 0.02);
   transition: var(--transition-normal);
 }
 
 .iconBtn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--contrast-surface-rgb), 0.05);
 }
 
 .badge {
@@ -172,7 +172,7 @@
   width: min(340px, calc(100vw - 32px));
   padding: 14px;
   z-index: 140;
-  background: var(--dropdown-bg, rgba(23, 32, 51, 0.95));
+  background: var(--dropdown-bg, rgba(var(--raised-surface-rgb), 0.95));
   animation: dropdownFade 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
@@ -201,7 +201,7 @@
 
 .closeMenuButton:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .notificationItem {
@@ -211,7 +211,7 @@
   padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: var(--notification-item-bg, rgba(255, 255, 255, 0.04));
+  background: var(--notification-item-bg, rgba(var(--contrast-surface-rgb), 0.04));
   align-items: center;
 }
 
@@ -235,7 +235,7 @@
 }
 
 .notificationDelete:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(var(--contrast-surface-rgb), 0.08);
   color: var(--text-primary);
 }
 
@@ -352,7 +352,7 @@
 
 .dropdownItem:hover {
   color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: rgba(var(--contrast-surface-rgb), 0.04);
 }
 
 .logoutBtn {
@@ -434,7 +434,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(var(--contrast-surface-rgb), 0.025);
   font-size: 0.82rem;
   font-weight: 800;
   text-transform: capitalize;
@@ -474,7 +474,7 @@
     width: 100%;
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-sm);
-    background: var(--input-bg, rgba(15, 22, 38, 0.6));
+    background: var(--input-bg, rgba(var(--surface-rgb), 0.6));
     color: var(--text-primary);
     padding: 10px 12px;
     outline: none;
@@ -520,6 +520,10 @@
     gap: 10px;
   }
 
+  .searchForm {
+    flex: 1 1 160px;
+  }
+
   .addBtn {
     flex: 1;
     justify-content: center;
@@ -542,5 +546,28 @@
 
   .pageTitle {
     font-size: 1.08rem;
+  }
+
+  .header {
+    padding: 12px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .addBtn {
+    min-width: 0;
+    padding-inline: 10px;
+  }
+
+  .searchForm {
+    display: none;
+  }
+
+  .notificationWrapper,
+  .profileWrapper {
+    margin-left: 0;
   }
 }

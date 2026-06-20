@@ -69,7 +69,7 @@
   padding: 7px 11px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.52);
+  background: rgba(var(--surface-rgb), 0.52);
   color: var(--text-secondary);
   font-size: 0.8rem;
   font-weight: 700;
@@ -113,11 +113,290 @@
   justify-content: flex-end;
 }
 
+.certificationPageColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(250px, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.certificationMainColumn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.clientDataPanel {
+  position: sticky;
+  top: 18px;
+  min-width: 0;
+  max-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.clientDataHeader {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.clientDataHeader > div {
+  min-width: 0;
+}
+
+.clientDataHeader h2 {
+  margin: 0 0 5px;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.clientDataHeader span {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientMoveButton {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid rgba(167, 139, 250, 0.5);
+  border-radius: var(--border-radius-sm);
+  background: rgba(124, 58, 237, 0.2);
+  color: var(--text-primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.clientMoveButton:hover:not(:disabled) {
+  border-color: rgba(167, 139, 250, 0.8);
+  background: rgba(124, 58, 237, 0.32);
+}
+
+.clientMoveButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.clientDataControls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(var(--surface-rgb), 0.3);
+}
+
+.clientDataControls select {
+  min-width: 122px;
+  min-height: 30px;
+  padding: 5px 28px 5px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  outline: none;
+  appearance: none;
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml;utf8,<svg fill='gray' height='18' viewBox='0 0 24 24' width='18' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.clientDataControls select:focus {
+  border-color: var(--primary);
+}
+
+.clientDataControls option {
+  background: var(--dropdown-bg);
+  color: var(--text-primary);
+}
+
+.clientDataControls span {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.clientDataBody {
+  min-height: 180px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.clientDataState {
+  min-height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.clientFolder {
+  padding-left: calc(var(--client-depth) * 12px);
+}
+
+.clientFolderName {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0;
+  color: var(--text-primary);
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.clientFolderName svg {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.clientFile {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.clientFile input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.clientFileOpen {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  text-align: left;
+}
+
+.clientFile:hover {
+  border-color: var(--border-color);
+  background: rgba(124, 58, 237, 0.1);
+  color: var(--text-primary);
+}
+
+.clientFile svg {
+  color: var(--text-muted);
+}
+
+.clientFile span {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientFile small {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.creditPickerModal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.creditPickerList {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.creditPickerList > button {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--surface-rgb), 0.5);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.creditPickerList > button:hover {
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(124, 58, 237, 0.13);
+  color: var(--text-primary);
+}
+
+.creditPickerList strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.creditPickerList span {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .certificationCreditList {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
+}
+
+.stepwiseCreditList {
+  height: max(560px, calc(100dvh - 174px));
+}
+
+.stepwiseCreditContent {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.stepwiseCreditContent .certificationCreditCard {
+  min-height: 100%;
 }
 
 .creditSearchBar {
@@ -128,7 +407,7 @@
   padding: 8px 11px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.46);
+  background: rgba(var(--surface-rgb), 0.46);
   color: var(--text-muted);
 }
 
@@ -165,7 +444,7 @@
   padding: 3px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.5);
+  background: rgba(var(--surface-rgb), 0.5);
 }
 
 .viewModeToggle button {
@@ -194,37 +473,37 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   overflow: hidden;
-  background: rgba(15, 22, 38, 0.28);
+  background: rgba(var(--surface-rgb), 0.28);
 }
 
 .creditCategorySd {
   border-color: rgba(20, 184, 166, 0.38);
-  background: linear-gradient(90deg, rgba(20, 184, 166, 0.12), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(20, 184, 166, 0.12), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryWc {
   border-color: rgba(59, 130, 246, 0.4);
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.12), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.12), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryEe {
   border-color: rgba(245, 158, 11, 0.42);
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryMr {
   border-color: rgba(168, 85, 247, 0.4);
-  background: linear-gradient(90deg, rgba(168, 85, 247, 0.12), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.12), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryRhw {
   border-color: rgba(236, 72, 153, 0.4);
-  background: linear-gradient(90deg, rgba(236, 72, 153, 0.11), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.11), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryId {
   border-color: rgba(34, 197, 94, 0.4);
-  background: linear-gradient(90deg, rgba(34, 197, 94, 0.11), rgba(15, 22, 38, 0.28) 22%);
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.11), rgba(var(--surface-rgb), 0.28) 22%);
 }
 
 .creditCategoryDefault {
@@ -275,7 +554,7 @@
   justify-content: center;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.52);
+  background: rgba(var(--surface-rgb), 0.52);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -296,7 +575,7 @@
   padding: 7px 11px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.52);
+  background: rgba(var(--surface-rgb), 0.52);
   color: var(--text-secondary);
   font-size: 0.8rem;
   font-weight: 800;
@@ -353,7 +632,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: rgba(15, 22, 38, 0.96);
+  background: rgba(var(--surface-rgb), 0.96);
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 800;
@@ -366,7 +645,7 @@
 }
 
 .table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(var(--contrast-surface-rgb), 0.025);
 }
 
 .creditCell {
@@ -389,7 +668,7 @@
   padding: 10px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.38);
+  background: rgba(var(--surface-rgb), 0.38);
 }
 
 .point-checked {
@@ -402,6 +681,11 @@
 
 .point-pending {
   border-color: rgba(245, 158, 11, 0.3);
+}
+
+.point-overridden {
+  border-color: rgba(167, 139, 250, 0.52);
+  background: rgba(124, 58, 237, 0.1);
 }
 
 .requirementTextButton {
@@ -452,18 +736,23 @@
 }
 
 .status-checked {
-  color: #34d399;
+  color: var(--success-text);
   background-color: rgba(16, 185, 129, 0.13);
 }
 
 .status-missing {
-  color: #f87171;
+  color: var(--danger-text);
   background-color: rgba(239, 68, 68, 0.13);
 }
 
 .status-pending {
-  color: #fbbf24;
+  color: var(--warning-text);
   background-color: rgba(245, 158, 11, 0.14);
+}
+
+.status-overridden {
+  color: #c4b5fd;
+  background-color: rgba(124, 58, 237, 0.2);
 }
 
 .savingIcon,
@@ -567,7 +856,7 @@
 
 .closeButton:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .modalBody {
@@ -614,7 +903,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   color: var(--text-secondary);
-  background: rgba(15, 22, 38, 0.58);
+  background: rgba(var(--surface-rgb), 0.58);
   text-align: left;
 }
 
@@ -674,6 +963,22 @@
   padding: 2px 0;
 }
 
+.certificationCreditHeader .requirementCompletionItem {
+  grid-template-columns: 16px minmax(0, 1fr);
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.certificationCreditHeader .requirementCompletionItem input {
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  accent-color: currentColor;
+}
+
 .requirementStatusDot {
   width: 8px;
   height: 8px;
@@ -691,15 +996,30 @@
 }
 
 .requirement-checked {
-  color: #34d399;
+  color: var(--success-text);
 }
 
 .requirement-pending {
-  color: #34d399;
+  color: var(--success-text);
 }
 
 .requirement-missing {
-  color: #f87171;
+  color: var(--danger-text);
+}
+
+.requirementChecked {
+  color: var(--success-text);
+}
+
+.requirementMissing {
+  color: var(--danger-text);
+}
+
+.requirementManuallyChecked {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(124, 58, 237, 0.22);
+  box-shadow: inset 3px 0 0 rgba(167, 139, 250, 0.85);
 }
 
 .filtrationBody {
@@ -725,7 +1045,7 @@
   flex-direction: column;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.38);
+  background: rgba(var(--surface-rgb), 0.38);
   overflow: hidden;
 }
 
@@ -735,7 +1055,7 @@
 
 .finalSubmissionPane {
   border-color: rgba(52, 211, 153, 0.42);
-  background: linear-gradient(180deg, rgba(16, 185, 129, 0.13), rgba(15, 22, 38, 0.48));
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.13), rgba(var(--surface-rgb), 0.48));
   box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.08), 0 16px 38px rgba(16, 185, 129, 0.08);
 }
 
@@ -745,7 +1065,7 @@
 }
 
 .finalSubmissionPane .filtrationPaneHeader h3 {
-  color: #bbf7d0;
+  color: var(--success-soft-text);
 }
 
 .filtrationPaneHeader {
@@ -786,7 +1106,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   color: var(--text-secondary);
-  background: rgba(15, 22, 38, 0.52);
+  background: rgba(var(--surface-rgb), 0.52);
   font-size: 0.76rem;
   font-weight: 800;
 }
@@ -806,7 +1126,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #34d399;
+  color: var(--success-text);
   border-color: rgba(16, 185, 129, 0.28);
 }
 
@@ -823,7 +1143,7 @@
   margin: 0 12px 12px;
   border: 1px solid rgba(139, 92, 246, 0.32);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.36);
+  background: rgba(var(--surface-rgb), 0.36);
   overflow: hidden;
 }
 
@@ -873,7 +1193,7 @@
   padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.5);
+  background: rgba(var(--surface-rgb), 0.5);
 }
 
 .filtrationGroupHeader {
@@ -919,7 +1239,7 @@
   padding: 9px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.58);
+  background: rgba(var(--surface-rgb), 0.58);
   cursor: pointer;
 }
 
@@ -974,7 +1294,7 @@
 
 .iconActionButton:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .fileContextMenu {
@@ -1004,7 +1324,7 @@
 
 .fileContextMenu button:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .fileContextMenu .dangerMenuItem {
@@ -1094,7 +1414,7 @@
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.48);
+  background: rgba(var(--surface-rgb), 0.48);
 }
 
 .aiSuggestionHeader,
@@ -1183,17 +1503,20 @@
 }
 
 .saveSheetButton {
-  color: #34d399;
+  color: var(--success-text);
   border-color: rgba(16, 185, 129, 0.26);
   background: rgba(16, 185, 129, 0.12);
 }
 
 .bottomNavigator {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 120px 1fr 120px;
   align-items: center;
   gap: 12px;
-  padding: 0 16px 16px;
+  padding: 12px 16px 2px;
+  border-top: 1px solid var(--border-color);
+  background: rgba(var(--surface-rgb), 0.72);
 }
 
 .bottomNavigator button,
@@ -1210,7 +1533,7 @@
 .bottomNavigator button {
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  background: rgba(15, 22, 38, 0.52);
+  background: rgba(var(--surface-rgb), 0.52);
 }
 
 .bottomNavigator button:last-child {
@@ -1250,7 +1573,31 @@
   }
 }
 
+@media (max-width: 1180px) {
+  .certificationPageColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .clientDataPanel {
+    position: static;
+    max-height: 520px;
+  }
+
+  .certificationFilterRight {
+    flex: 1 1 360px;
+  }
+}
+
 @media (max-width: 768px) {
+  .certificationPageColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .clientDataPanel {
+    position: static;
+    max-height: 520px;
+  }
+
   .toolbar {
     align-items: stretch;
   }
@@ -1289,6 +1636,7 @@
 
   .certificationCreditActions {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .requirementPoint {
@@ -1301,6 +1649,7 @@
 
   .filtrationBody {
     grid-template-columns: 1fr;
+    padding: 10px;
   }
 
   .rightPaneStack {
@@ -1309,6 +1658,24 @@
 
   .currentCreditBar {
     grid-template-columns: 1fr;
+  }
+
+  .bulkActionBar,
+  .filtrationPaneHeader {
+    flex-wrap: wrap;
+  }
+
+  .bulkActionBar .moveButton {
+    margin-left: 0;
+  }
+
+  .stepwiseCreditList {
+    height: auto;
+    min-height: 0;
+  }
+
+  .stepwiseCreditContent {
+    overflow: visible;
   }
 
   .filtrationFileRow {
@@ -1325,5 +1692,46 @@
 
   .bottomNavigator span {
     display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .certificationCreditList {
+    padding: 8px;
+  }
+
+  .creditSearchBar {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .creditSearchActions {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .clientDataHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .clientMoveButton {
+    width: 100%;
+  }
+
+  .creditPickerList > button {
+    grid-template-columns: minmax(0, 1fr) 16px;
+  }
+
+  .creditPickerList > button span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .filtrationFileRow {
+    padding: 9px 7px;
+  }
+
+  .bottomNavigator {
+    padding-inline: 0;
   }
 }

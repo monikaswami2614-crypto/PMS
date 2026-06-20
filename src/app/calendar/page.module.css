@@ -35,7 +35,7 @@
   min-height: 38px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.72);
+  background: rgba(var(--surface-rgb), 0.72);
   color: var(--text-primary);
   font-size: 1.05rem;
   font-weight: 800;
@@ -69,7 +69,7 @@
 }
 
 .todayBtn {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--contrast-surface-rgb), 0.03);
   border: 1px solid var(--border-color);
   padding: 6px 12px;
   border-radius: var(--border-radius-sm);
@@ -82,7 +82,7 @@
 .todayBtn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .navGroup {
@@ -90,7 +90,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--contrast-surface-rgb), 0.02);
 }
 
 .navBtn {
@@ -105,7 +105,7 @@
 
 .navBtn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--contrast-surface-rgb), 0.04);
 }
 
 .navBtn:first-child {
@@ -145,7 +145,7 @@
   flex-direction: column;
   justify-content: space-between;
   cursor: pointer;
-  background-color: rgba(255, 255, 255, 0.005);
+  background-color: rgba(var(--contrast-surface-rgb), 0.005);
   transition: var(--transition-fast);
 }
 
@@ -158,7 +158,7 @@
 }
 
 .cell:hover {
-  background-color: rgba(255, 255, 255, 0.015);
+  background-color: rgba(var(--contrast-surface-rgb), 0.015);
 }
 
 .paddedCell {
@@ -341,7 +341,7 @@
 
 .closeBtn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
 }
 
 .deadlineForm {
@@ -380,7 +380,7 @@
   width: 100%;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 22, 38, 0.62);
+  background: rgba(var(--surface-rgb), 0.62);
   color: var(--text-primary);
   font-size: 0.9rem;
   outline: none;
@@ -397,7 +397,7 @@
 .formGroup select:focus,
 .formGroup textarea:focus {
   border-color: var(--primary);
-  background: rgba(15, 22, 38, 0.9);
+  background: rgba(var(--surface-rgb), 0.9);
   box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
 }
 
@@ -429,12 +429,12 @@
 
 .cancelBtn {
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--contrast-surface-rgb), 0.03);
 }
 
 .cancelBtn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(var(--contrast-surface-rgb), 0.07);
 }
 
 .submitBtn {
@@ -497,5 +497,33 @@
   .cancelBtn,
   .submitBtn {
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .calendarHeader {
+    padding: 12px;
+  }
+
+  .dateSelectors,
+  .controls {
+    flex-wrap: wrap;
+  }
+
+  .weekLabel {
+    font-size: 0.62rem;
+    letter-spacing: 0;
+  }
+
+  .daysGrid {
+    grid-auto-rows: 72px;
+  }
+
+  .cell {
+    padding: 4px;
+  }
+
+  .dayNumber {
+    font-size: 0.72rem;
   }
 }

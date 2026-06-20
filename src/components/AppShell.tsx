@@ -76,18 +76,18 @@ export default function AppShell({ children }: Readonly<{ children: React.ReactN
   const pathname = usePathname();
   const router = useRouter();
   const isLoginPage = pathname === '/login';
-  const isAuthenticated = useSyncExternalStore(
+  const isAuthenticated = useSyncExternalStore<boolean | null>(
     (onStoreChange) => {
       window.addEventListener('storage', onStoreChange);
 
       return () => window.removeEventListener('storage', onStoreChange);
     },
     () => window.localStorage.getItem(SESSION_KEY) === 'active',
-    () => false,
+    () => null,
   );
 
   useEffect(() => {
-    if (!isLoginPage && !isAuthenticated) {
+    if (!isLoginPage && isAuthenticated === false) {
       router.replace('/login');
     }
   }, [isAuthenticated, isLoginPage, router]);
@@ -96,7 +96,7 @@ export default function AppShell({ children }: Readonly<{ children: React.ReactN
     return <main className="auth-container">{children}</main>;
   }
 
-  if (!isAuthenticated) {
+  if (isAuthenticated !== true) {
     return <main className="auth-loading" aria-label="Checking login session" />;
   }
 

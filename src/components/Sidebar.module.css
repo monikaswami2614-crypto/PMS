@@ -4,7 +4,7 @@
   height: 100vh;
   flex: 0 0 var(--sidebar-width);
   width: var(--sidebar-width);
-  background: rgba(11, 16, 27, 0.75);
+  background: var(--sidebar-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-color);
@@ -40,7 +40,7 @@
   width: 36px;
   height: 36px;
   border-radius: var(--border-radius-sm);
-  background: var(--accent-gradient);
+  background: var(--sidebar-project-active-bg);
   box-shadow: var(--glow-shadow);
   flex-shrink: 0;
 }
@@ -79,7 +79,7 @@
   border-radius: 50%;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  color: var(--text-secondary);
+  color: var(--sidebar-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -104,7 +104,7 @@
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--text-muted);
+  color: var(--sidebar-text-muted);
   font-weight: 700;
   display: block;
   margin-bottom: 8px;
@@ -124,8 +124,8 @@
   padding: 8px 10px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  color: var(--text-secondary);
-  background: rgba(15, 22, 38, 0.8);
+  color: var(--sidebar-text-secondary);
+  background: var(--sidebar-surface);
   font-size: 0.82rem;
   font-weight: 700;
   text-align: left;
@@ -134,7 +134,7 @@
 }
 
 .projectButton:hover {
-  color: var(--text-primary);
+  color: var(--sidebar-text-primary);
   border-color: var(--border-color-hover);
   box-shadow: 0 0 8px rgba(99, 102, 241, 0.1);
 }
@@ -142,7 +142,7 @@
 .activeProjectButton {
   color: #ffffff;
   border-color: rgba(99, 102, 241, 0.5);
-  background: rgba(99, 102, 241, 0.16);
+  background: var(--accent-gradient);
   box-shadow: var(--glow-shadow);
 }
 
@@ -172,7 +172,7 @@
   align-items: center;
   padding: 12px 14px;
   border-radius: var(--border-radius-sm);
-  color: var(--text-secondary);
+  color: var(--sidebar-text-secondary);
   font-weight: 500;
   font-size: 0.925rem;
   transition: var(--transition-normal);
@@ -192,8 +192,8 @@
 
 /* Hover and Active states */
 .navLink:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--sidebar-text-primary);
+  background: rgba(var(--contrast-surface-rgb), 0.03);
 }
 
 .navLink:hover .navIcon {
@@ -224,7 +224,7 @@
   height: 6px;
   border-radius: 50%;
   background-color: #ffffff;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 8px rgba(var(--contrast-surface-rgb), 0.8);
 }
 
 .checklistSection {
@@ -248,7 +248,7 @@
   align-items: center;
   justify-content: space-between;
   font-size: 0.75rem;
-  color: var(--text-muted);
+  color: var(--sidebar-text-muted);
 }
 
 .userStatus {
@@ -307,13 +307,40 @@
   .nav {
     flex-grow: 0;
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
   }
 
   .navList {
     flex-direction: row;
+    width: max-content;
   }
 
   .navLink {
     white-space: nowrap;
+    padding: 9px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar,
+  .collapsed {
+    padding: 10px 8px;
+  }
+
+  .brand {
+    padding: 4px 8px;
+  }
+
+  .brandName {
+    font-size: 0.88rem;
+  }
+
+  .navText {
+    margin-left: 7px;
+    font-size: 0.8rem;
   }
 }

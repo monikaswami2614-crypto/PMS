@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, FolderClosed, Loader2, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import styles from '../checklist-review/page.module.css';
 
-type RequirementStatus = 'pending' | 'missing' | 'checked';
+type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
 
 type FiltrationPhase = 'pre' | 'final';
 
@@ -61,6 +61,7 @@ type SheetFile = FiltrationFile & {
 
 type SubmissionMode = 'first' | 'second';
 type FileTypeFilter = 'all' | 'pdf' | 'doc' | 'excel' | 'autocad' | 'photos' | 'other';
+type ClientDataFileFilter = 'all' | 'pdf' | 'doc' | 'excel' | 'autocad' | 'other';
 type FileActionScope = 'filtration' | 'supporting' | 'final';
 type SelectableFileScope = 'filtration' | 'supporting' | 'ai-filter';
 type CreditViewMode = 'scrolling' | 'stepwise';
@@ -106,7 +107,53 @@ type AiFilterState = {
   files: SheetFile[];
 };
 
+type ProjectTreeFile = {
+  id: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  extension?: string | null;
+  size?: number;
+};
+
+type ProjectTreeFolder = {
+  id: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  children: ProjectTreeFolder[];
+  files: ProjectTreeFile[];
+};
+
+type ClientDataAiMatch = {
+  groupId: string;
+  fileId: string;
+  requirementId: string;
+  requirementName: string;
+  matchScore: number;
+  matchReason: string;
+};
+
+const flattenProjectTreeFiles = (folder: ProjectTreeFolder): ProjectTreeFile[] => [
+  ...folder.files,
+  ...folder.children.flatMap(flattenProjectTreeFiles),
+];
+
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
+const selectedProjectStorageKey = 'certification-filtration-selected-project';
+const selectedProjectChangeEvent = 'certification-filtration-project-change';
+
+const subscribeToSelectedProject = (onStoreChange: () => void) => {
+  window.addEventListener('storage', onStoreChange);
+  window.addEventListener(selectedProjectChangeEvent, onStoreChange);
+
+  return () => {
+    window.removeEventListener('storage', onStoreChange);
+    window.removeEventListener(selectedProjectChangeEvent, onStoreChange);
+  };
+};
+
+const getSelectedProjectSnapshot = () => window.localStorage.getItem(selectedProjectStorageKey) ?? '';
 
 const fileTypeOrder: Record<string, number> = {
   pdf: 0,
@@ -140,7 +187,7 @@ const mainCreditNames: Record<string, string> = {
 export default function CertificationFiltrationPage() {
   const { projects } = useProjects();
   const reviewProjects = useMemo(() => projects.filter((project) => project.id !== 'all'), [projects]);
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const selectedProjectId = useSyncExternalStore(subscribeToSelectedProject, getSelectedProjectSnapshot, () => '');
   const [filtrationData, setFiltrationData] = useState<FiltrationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -158,10 +205,90 @@ export default function CertificationFiltrationPage() {
   const [creditSearch, setCreditSearch] = useState('');
   const [creditViewMode, setCreditViewMode] = useState<CreditViewMode>('scrolling');
   const [activeCreditIndex, setActiveCreditIndex] = useState(0);
+  const [clientDataFolder, setClientDataFolder] = useState<ProjectTreeFolder | null>(null);
+  const [isClientDataLoading, setIsClientDataLoading] = useState(false);
+  const [clientDataError, setClientDataError] = useState('');
+  const [selectedClientFiles, setSelectedClientFiles] = useState<Record<string, boolean>>({});
+  const [isCreditPickerOpen, setIsCreditPickerOpen] = useState(false);
+  const [clientFiltrationFiles, setClientFiltrationFiles] = useState<SheetFile[]>([]);
+  const [aiMatchedClientFiles, setAiMatchedClientFiles] = useState<SheetFile[]>([]);
+  const [isClientAiMatching, setIsClientAiMatching] = useState(false);
+  const [clientAiError, setClientAiError] = useState('');
+  const [requirementSelections, setRequirementSelections] = useState<Record<string, boolean>>({});
+  const [manuallyCheckedRequirements, setManuallyCheckedRequirements] = useState<Record<string, boolean>>({});
+  const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
 
-  const effectiveSelectedProjectId = selectedProjectId || reviewProjects[0]?.id || '';
+  const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
+    ? selectedProjectId
+    : reviewProjects[0]?.id || '';
   const selectedProject = reviewProjects.find((project) => project.id === effectiveSelectedProjectId);
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
+
+  useEffect(() => {
+    if (!effectiveSelectedProjectId) {
+      setClientDataFolder(null);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const findClientDataFolder = (folders: ProjectTreeFolder[]): ProjectTreeFolder | null => {
+      const candidates: Array<{ folder: ProjectTreeFolder; depth: number }> = [];
+      let currentLevel = folders;
+      let depth = 0;
+
+      while (currentLevel.length > 0) {
+        currentLevel.forEach((folder) => {
+          if (/^0\.\s*/.test(folder.name.trim())) candidates.push({ folder, depth });
+        });
+        currentLevel = currentLevel.flatMap((folder) => folder.children ?? []);
+        depth += 1;
+      }
+
+      const submissionPattern = submissionMode === 'second'
+        ? /(^|[^a-z0-9])(2nd|second|2\s*submission)/i
+        : /(^|[^a-z0-9])(1st|first|1\s*submission)/i;
+      const minimumDepth = Math.min(...candidates.map((candidate) => candidate.depth));
+      const nearestCandidates = candidates.filter((candidate) => candidate.depth === minimumDepth);
+      const preferredCandidates = nearestCandidates.filter(({ folder }) => (
+        submissionPattern.test(`${folder.relativePath} ${folder.path}`)
+      ));
+      const availableCandidates = preferredCandidates.length > 0 ? preferredCandidates : nearestCandidates;
+
+      return availableCandidates[0]?.folder ?? null;
+    };
+
+    const loadClientData = async () => {
+      setIsClientDataLoading(true);
+      setClientDataError('');
+      setClientDataFolder(null);
+      setSelectedClientFiles({});
+      setIsCreditPickerOpen(false);
+      setClientFiltrationFiles([]);
+      setAiMatchedClientFiles([]);
+      setIsClientAiMatching(false);
+      setClientAiError('');
+
+      try {
+        const response = await fetch(`${apiBase}/api/projects/${effectiveSelectedProjectId}/tree/public`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Failed to load client data');
+
+        const payload = await response.json();
+        setClientDataFolder(findClientDataFolder(payload.data ?? []));
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          setClientDataError(err instanceof Error ? err.message : 'Failed to load client data');
+        }
+      } finally {
+        setIsClientDataLoading(false);
+      }
+    };
+
+    loadClientData();
+    return () => controller.abort();
+  }, [effectiveSelectedProjectId, submissionMode]);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) return;
@@ -203,6 +330,85 @@ export default function CertificationFiltrationPage() {
     return () => controller.abort();
   }, [effectiveSelectedProjectId, phase]);
 
+  useEffect(() => {
+    if (
+      !clientDataFolder
+      || !filtrationData
+      || filtrationData.project.id !== effectiveSelectedProjectId
+      || filtrationData.phase !== phase
+    ) return;
+
+    const clientFiles = flattenProjectTreeFiles(clientDataFolder);
+    if (clientFiles.length === 0 || filtrationData.groups.length === 0) {
+      setAiMatchedClientFiles([]);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const matchClientData = async () => {
+      setIsClientAiMatching(true);
+      setClientAiError('');
+      setAiMatchedClientFiles([]);
+
+      try {
+        const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/files/match-client-data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            files: clientFiles.map((file) => ({ id: file.id })),
+            groups: filtrationData.groups.map((group) => ({
+              id: group.id,
+              requirements: group.requirements.map((requirement) => ({
+                id: requirement.id,
+                requirementName: requirement.requirementName,
+              })),
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || 'Failed to match client data');
+        }
+
+        const payload = await response.json();
+        const filesById = new Map(clientFiles.map((file) => [file.id, file]));
+        const groupsById = new Map(filtrationData.groups.map((group) => [group.id, group]));
+        const matchedFiles = (payload.data as ClientDataAiMatch[] ?? []).flatMap((match) => {
+          const file = filesById.get(match.fileId);
+          const group = groupsById.get(match.groupId);
+          if (!file || !group) return [];
+
+          return [{
+            ...file,
+            status: 'pending' as RequirementStatus,
+            requirementId: match.requirementId,
+            requirementName: match.requirementName,
+            matchConfidence: match.matchScore,
+            matchReason: match.matchReason,
+            clientId: `${group.id}-ai-client-${file.id}`,
+            creditName: group.creditName,
+            subCreditName: group.subCreditName,
+            displayName: file.name,
+          }];
+        });
+
+        setAiMatchedClientFiles(matchedFiles);
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          setClientAiError(err instanceof Error ? err.message : 'Failed to match client data');
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsClientAiMatching(false);
+      }
+    };
+
+    matchClientData();
+    return () => controller.abort();
+  }, [clientDataFolder, effectiveSelectedProjectId, filtrationData, phase]);
+
   const pageTitle = phase === 'pre' ? 'Pre Certification Filtration' : 'Final Certification Filtration';
 
   const toSheetFile = (file: FiltrationFile, group: FiltrationGroup): SheetFile => ({
@@ -240,12 +446,133 @@ export default function CertificationFiltrationPage() {
     return styles.creditCategoryDefault;
   };
 
+  const formatFileSize = (size?: number) => {
+    if (!size) return '';
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const selectedClientFileCount = Object.values(selectedClientFiles).filter(Boolean).length;
+
+  const getClientFileExtension = (file: ProjectTreeFile) => (
+    (file.extension || file.name.split('.').pop() || '').toLowerCase()
+  );
+
+  const matchesClientFileType = (file: ProjectTreeFile) => {
+    const extension = getClientFileExtension(file);
+    if (clientDataFileFilter === 'all') return true;
+    if (clientDataFileFilter === 'pdf') return extension === 'pdf';
+    if (clientDataFileFilter === 'doc') return ['doc', 'docx'].includes(extension);
+    if (clientDataFileFilter === 'excel') return ['xls', 'xlsx', 'xlsm', 'csv'].includes(extension);
+    if (clientDataFileFilter === 'autocad') return ['dwg', 'dxf'].includes(extension);
+    return !['pdf', 'doc', 'docx', 'xls', 'xlsx', 'xlsm', 'csv', 'dwg', 'dxf'].includes(extension);
+  };
+
+  const hasVisibleClientFiles = (folder: ProjectTreeFolder): boolean => (
+    folder.files.some(matchesClientFileType) || folder.children.some(hasVisibleClientFiles)
+  );
+
+  const visibleClientFileCount = clientDataFolder
+    ? flattenProjectTreeFiles(clientDataFolder).filter(matchesClientFileType).length
+    : 0;
+
+  const moveClientFilesToCredit = (group: FiltrationGroup) => {
+    if (!clientDataFolder) return;
+
+    const files = flattenProjectTreeFiles(clientDataFolder).filter((file) => selectedClientFiles[file.id]);
+    if (files.length === 0) return;
+
+    const fallbackRequirement = group.requirements[0];
+    const stagedFiles: SheetFile[] = files.map((file) => ({
+      ...file,
+      status: 'pending',
+      requirementId: fallbackRequirement?.id ?? group.id,
+      requirementName: fallbackRequirement?.requirementName ?? group.subCreditName,
+      clientId: `${group.id}-client-data-${file.id}`,
+      creditName: group.creditName,
+      subCreditName: group.subCreditName,
+      displayName: file.name,
+    }));
+
+    setClientFiltrationFiles((current) => uniqueFilesByClientId([...current, ...stagedFiles]));
+    setSelectedClientFiles({});
+    setIsCreditPickerOpen(false);
+  };
+
+  const renderClientFolder = (folder: ProjectTreeFolder, depth = 0): React.ReactNode => (
+    <div key={folder.id} className={styles.clientFolder} style={{ '--client-depth': depth } as React.CSSProperties}>
+      {depth > 0 && (
+        <div className={styles.clientFolderName}>
+          <FolderClosed size={15} />
+          <span>{folder.name}</span>
+        </div>
+      )}
+      {folder.files.filter(matchesClientFileType).map((file) => (
+        <div key={file.id} className={styles.clientFile} title={file.relativePath || file.path}>
+          <input
+            type="checkbox"
+            checked={Boolean(selectedClientFiles[file.id])}
+            onChange={(event) => setSelectedClientFiles((current) => ({ ...current, [file.id]: event.target.checked }))}
+            aria-label={`Select ${file.name}`}
+          />
+          <button type="button" className={styles.clientFileOpen} onClick={() => openFilePreview(file.id)}>
+            <FileText size={14} />
+            <span>{file.name}</span>
+          </button>
+          {file.size ? <small>{formatFileSize(file.size)}</small> : null}
+        </div>
+      ))}
+      {folder.children.filter(hasVisibleClientFiles).map((child) => renderClientFolder(child, depth + 1))}
+    </div>
+  );
+
   const getCreditStatus = (group?: FiltrationGroup | null): RequirementStatus => {
     if (!group) return 'missing';
-    const statuses = group.requirements.map((requirement) => requirement.status);
-    if (statuses.length > 0 && statuses.every((status) => status === 'checked')) return 'checked';
-    if (group.requirements.some((requirement) => requirement.matchedFiles.length > 0)) return 'pending';
+    if (group.requirements.length > 0 && group.requirements.every(isRequirementChecked)) return 'checked';
+    if (group.requirements.some(isRequirementChecked)) return 'pending';
     return 'missing';
+  };
+
+  const getRequirementSelectionKey = (requirementId: string) => (
+    `${effectiveSelectedProjectId}-${phase}-${requirementId}`
+  );
+
+  const isRequirementChecked = (requirement: FiltrationRequirement) => {
+    const key = getRequirementSelectionKey(requirement.id);
+    if (Object.prototype.hasOwnProperty.call(requirementSelections, key)) return requirementSelections[key];
+    return requirement.status !== 'missing';
+  };
+
+  const setRequirementChecked = async (requirement: FiltrationRequirement, checked: boolean) => {
+    const key = getRequirementSelectionKey(requirement.id);
+    setRequirementSelections((current) => ({ ...current, [key]: checked }));
+    setManuallyCheckedRequirements((current) => ({ ...current, [key]: checked }));
+
+    try {
+      const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/items/${requirement.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase, status: checked ? 'overridden' : 'missing' }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || 'Failed to synchronize requirement status');
+      }
+    } catch (err) {
+      setRequirementSelections((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setManuallyCheckedRequirements((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setError(err instanceof Error ? err.message : 'Failed to synchronize requirement status');
+    }
   };
 
   const visibleGroups = (() => {
@@ -336,9 +663,20 @@ export default function CertificationFiltrationPage() {
     )
   );
 
-  const getSupportingFiles = (group: FiltrationGroup): SheetFile[] => (
-    supportingFiles.filter((file) => file.creditName === group.creditName && file.subCreditName === group.subCreditName)
-  );
+  const getSupportingFiles = (group: FiltrationGroup): SheetFile[] => {
+    const manuallyStagedFiles = supportingFiles.filter((file) => (
+      file.creditName === group.creditName && file.subCreditName === group.subCreditName
+    ));
+    const finalFileIds = new Set(getFinalFiles(group).map((file) => file.id));
+    const nestedCreditFiles = getCreditSubmissionFiles(group).filter((file) => (
+      matchesSubmissionMode(file)
+      && getCreditFolderDepth(file, group.creditName) !== null
+      && (getCreditFolderDepth(file, group.creditName) ?? 0) > 0
+      && !finalFileIds.has(file.id)
+    ));
+
+    return uniqueFilesByFileId(uniqueFilesByClientId([...manuallyStagedFiles, ...nestedCreditFiles]));
+  };
 
   const getFinalFiles = (group: FiltrationGroup): SheetFile[] => (
     finalFiles.filter((file) => file.creditName === group.creditName && file.subCreditName === group.subCreditName)
@@ -353,17 +691,22 @@ export default function CertificationFiltrationPage() {
 
   const getFolderTokens = (value: string): string[] => value.toLowerCase().match(/[a-z]+|\d+/g) ?? [];
 
-  const isExactCreditFolderFile = (file: SheetFile, creditName: string): boolean => {
+  const getCreditFolderDepth = (file: SheetFile, creditName: string): number | null => {
     const creditTokens = getFolderTokens(creditName);
-    if (creditTokens.length === 0) return false;
+    if (creditTokens.length === 0) return null;
 
-    return `${file.relativePath || ''}/${file.path || ''}`.split(/[\\/]+/).some((part) => {
+    const pathParts = (file.relativePath || file.path || '').split(/[\\/]+/).filter(Boolean);
+    const folderParts = pathParts.slice(0, -1);
+    const creditFolderIndex = folderParts.findIndex((part) => {
       const folderTokens = getFolderTokens(part);
       if (folderTokens.length < creditTokens.length) return false;
       return folderTokens.some((_, startIndex) => (
         creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
       ));
     });
+
+    if (creditFolderIndex === -1) return null;
+    return folderParts.length - creditFolderIndex - 1;
   };
 
   const uniqueFilesByClientId = (files: SheetFile[]): SheetFile[] => (
@@ -377,17 +720,27 @@ export default function CertificationFiltrationPage() {
   const getSubmissionFiles = (group: FiltrationGroup): SheetFile[] => (
     uniqueFilesByFileId(uniqueFilesByClientId([
       ...getFinalFiles(group),
-      ...getCreditSubmissionFiles(group).filter((file) => matchesSubmissionMode(file)),
-      ...getGroupFiles(group).filter((file) => isExactCreditFolderFile(file, group.creditName) && matchesSubmissionMode(file)),
+      ...getCreditSubmissionFiles(group).filter((file) => (
+        matchesSubmissionMode(file) && getCreditFolderDepth(file, group.creditName) === 0
+      )),
+      ...getGroupFiles(group).filter((file) => (
+        matchesSubmissionMode(file) && getCreditFolderDepth(file, group.creditName) === 0
+      )),
     ]))
   );
 
   const getAvailableFiltrationFiles = (group: FiltrationGroup): SheetFile[] => {
     const stagedKeys = new Set([...getSupportingFiles(group), ...getSubmissionFiles(group)].map((file) => file.clientId));
     const fileTypeFilter = fileTypeFilters[group.id] ?? 'all';
-    return sortFilesForDisplay(getGroupFiles(group).filter((file) => (
+    const matchedFiles = aiMatchedClientFiles.filter((file) => (
+      file.creditName === group.creditName && file.subCreditName === group.subCreditName
+    ));
+    const assignedClientFiles = clientFiltrationFiles.filter((file) => (
+      file.creditName === group.creditName && file.subCreditName === group.subCreditName
+    ));
+
+    return sortFilesForDisplay(uniqueFilesByFileId(uniqueFilesByClientId([...matchedFiles, ...assignedClientFiles])).filter((file) => (
       !stagedKeys.has(file.clientId)
-      && matchesSubmissionMode(file)
       && matchesFileType(file, fileTypeFilter)
     )));
   };
@@ -738,12 +1091,28 @@ export default function CertificationFiltrationPage() {
             <h3>{getCreditTitle(group)}</h3>
             {group.requirements.length > 0 && (
               <div className={styles.requirementCompletionList}>
-                {group.requirements.map((requirement) => (
-                  <div key={requirement.id} className={`${styles.requirementCompletionItem} ${styles[`requirement-${requirement.status}`]}`}>
-                    <span className={styles.requirementStatusDot} />
-                    <span className={styles.requirementCompletionText}>{requirement.requirementName}</span>
-                  </div>
-                ))}
+                {group.requirements.map((requirement) => {
+                  const selectionKey = getRequirementSelectionKey(requirement.id);
+                  const isChecked = isRequirementChecked(requirement);
+                  const isManuallyChecked = requirement.status === 'overridden' || Boolean(manuallyCheckedRequirements[selectionKey]);
+                  const colorClass = isManuallyChecked
+                    ? styles.requirementManuallyChecked
+                    : isChecked
+                      ? styles.requirementChecked
+                      : styles.requirementMissing;
+
+                  return (
+                    <label key={requirement.id} className={`${styles.requirementCompletionItem} ${colorClass}`}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(event) => setRequirementChecked(requirement, event.target.checked)}
+                        aria-label={`Mark requirement: ${requirement.requirementName}`}
+                      />
+                      <span className={styles.requirementCompletionText}>{requirement.requirementName}</span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -802,7 +1171,16 @@ export default function CertificationFiltrationPage() {
               </button>
             </div>
             <div className={styles.filtrationScroll} style={{ maxHeight: 320 }}>
-              {renderFileList(group, availableFiles, 'filtration', 'No matching documents found for this credit.')}
+              {isClientAiMatching ? (
+                <div className={styles.aiFilterLoading}>
+                  <Loader2 size={18} className={styles.loadingIcon} />
+                  <span>AI is matching Client Data to requirements</span>
+                </div>
+              ) : clientAiError ? (
+                <div className={styles.filtrationError}>{clientAiError}</div>
+              ) : (
+                renderFileList(group, availableFiles, 'filtration', 'No Client Data files match this credit requirement.')
+              )}
             </div>
             {aiFilter && (
               <div className={styles.aiFilterResults}>
@@ -882,13 +1260,18 @@ export default function CertificationFiltrationPage() {
 
   return (
     <div className={styles.container}>
-      <div className={`${styles.toolbar} ${styles.certificationToolbar} glassmorphism`}>
+      <div className={styles.certificationPageColumns}>
+        <main className={styles.certificationMainColumn}>
+          <div className={`${styles.toolbar} ${styles.certificationToolbar} glassmorphism`}>
         <div className={styles.certificationFilterLeft}>
           <div className={`${styles.selectorGroup} ${styles.certificationProjectSelector}`}>
             <ClipboardCheck size={18} className={styles.toolbarIcon} />
             <select
               value={effectiveSelectedProjectId}
-              onChange={(event) => setSelectedProjectId(event.target.value)}
+              onChange={(event) => {
+                window.localStorage.setItem(selectedProjectStorageKey, event.target.value);
+                window.dispatchEvent(new Event(selectedProjectChangeEvent));
+              }}
               className={styles.projectSelect}
             >
               {reviewProjects.length === 0 && <option value="">No projects available</option>}
@@ -930,18 +1313,18 @@ export default function CertificationFiltrationPage() {
             <option value="final">Final Certification</option>
           </select>
         </div>
-      </div>
+          </div>
 
-      {error && <div className={styles.errorBox}>{error}</div>}
+          {error && <div className={styles.errorBox}>{error}</div>}
 
-      <div className={`${styles.filtrationModal} glassmorphism`} style={{ width: '100%', height: 'auto', minHeight: 'calc(100vh - 174px)' }}>
+          <div className={`${styles.filtrationModal} glassmorphism`} style={{ width: '100%', height: 'auto', minHeight: 'calc(100vh - 174px)' }}>
         {isLoading ? (
           <div className={styles.loadingState}>
             <Loader2 size={28} className={styles.loadingIcon} />
             <span>Loading filtration data</span>
           </div>
         ) : filtrationData && filtrationData.groups.length > 0 ? (
-          <div className={styles.certificationCreditList}>
+          <div className={`${styles.certificationCreditList} ${creditViewMode === 'stepwise' ? styles.stepwiseCreditList : ''}`}>
             <div className={styles.creditSearchBar}>
               <Search size={16} />
               <input
@@ -976,7 +1359,9 @@ export default function CertificationFiltrationPage() {
               visibleGroups.map((group) => renderCreditCard(group))
             ) : visibleGroups.length > 0 ? (
               <>
-                {renderCreditCard(visibleGroups[Math.min(activeCreditIndex, visibleGroups.length - 1)])}
+                <div className={styles.stepwiseCreditContent}>
+                  {renderCreditCard(visibleGroups[Math.min(activeCreditIndex, visibleGroups.length - 1)])}
+                </div>
                 <div className={styles.bottomNavigator}>
                   <button
                     type="button"
@@ -1011,7 +1396,85 @@ export default function CertificationFiltrationPage() {
             <p>Select a project with checklist filtration data.</p>
           </div>
         )}
+          </div>
+        </main>
+
+        <aside className={`${styles.clientDataPanel} glassmorphism`}>
+          <div className={styles.clientDataHeader}>
+            <div>
+              <h2>Client data</h2>
+              <span>{selectedProject?.name ?? 'Selected project'}</span>
+            </div>
+            <button
+              type="button"
+              className={styles.clientMoveButton}
+              disabled={selectedClientFileCount === 0 || !filtrationData?.groups.length}
+              onClick={() => setIsCreditPickerOpen(true)}
+            >
+              Move Selected ({selectedClientFileCount})
+            </button>
+          </div>
+          <div className={styles.clientDataControls}>
+            <select
+              value={clientDataFileFilter}
+              onChange={(event) => {
+                setClientDataFileFilter(event.target.value as ClientDataFileFilter);
+                setSelectedClientFiles({});
+              }}
+              aria-label="Filter Client Data files by type"
+            >
+              <option value="all">All Files</option>
+              <option value="autocad">DWG</option>
+              <option value="excel">Excel</option>
+              <option value="doc">DOC</option>
+              <option value="pdf">PDF</option>
+              <option value="other">Other</option>
+            </select>
+            <span>{visibleClientFileCount} files</span>
+          </div>
+          <div className={styles.clientDataBody}>
+            {isClientDataLoading ? (
+              <div className={styles.clientDataState}>
+                <Loader2 size={20} className={styles.loadingIcon} />
+                <span>Loading client data</span>
+              </div>
+            ) : clientDataError ? (
+              <div className={styles.clientDataState}>{clientDataError}</div>
+            ) : clientDataFolder && visibleClientFileCount > 0 ? (
+              renderClientFolder(clientDataFolder)
+            ) : clientDataFolder ? (
+              <div className={styles.clientDataState}>No files match this filter.</div>
+            ) : (
+              <div className={styles.clientDataState}>No folder beginning with 0. was found for this project.</div>
+            )}
+          </div>
+        </aside>
       </div>
+
+      {isCreditPickerOpen && (
+        <div className={styles.fileInfoOverlay} onClick={() => setIsCreditPickerOpen(false)}>
+          <div className={`${styles.creditPickerModal} glassmorphism`} onClick={(event) => event.stopPropagation()}>
+            <div className={styles.fileInfoHeader}>
+              <div>
+                <h3>Select credit</h3>
+                <span className={styles.modalCaption}>Move {selectedClientFileCount} selected file{selectedClientFileCount === 1 ? '' : 's'} to Filtration</span>
+              </div>
+              <button type="button" className={styles.closeButton} onClick={() => setIsCreditPickerOpen(false)} aria-label="Close credit selection">
+                <X size={16} />
+              </button>
+            </div>
+            <div className={styles.creditPickerList}>
+              {(filtrationData?.groups ?? []).map((group) => (
+                <button type="button" key={group.id} onClick={() => moveClientFilesToCredit(group)}>
+                  <strong>{group.creditName}</strong>
+                  {group.subCreditName && <span>{group.subCreditName}</span>}
+                  <ArrowRight size={15} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {fileContextMenu && (
         <div

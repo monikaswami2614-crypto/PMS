@@ -9,7 +9,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(23, 32, 51, 0.4) 0%, rgba(99, 102, 241, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(var(--raised-surface-rgb), 0.4) 0%, rgba(99, 102, 241, 0.05) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-md);
   padding: 24px;
@@ -32,7 +32,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--contrast-surface-rgb), 0.03);
   border: 1px solid var(--border-color);
   padding: 8px 14px;
   border-radius: var(--border-radius-sm);
@@ -190,14 +190,14 @@
 /* Critical Tasks Row */
 .urgentTaskRow {
   padding: 14px;
-  background-color: rgba(255, 255, 255, 0.01);
+  background-color: rgba(var(--contrast-surface-rgb), 0.01);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   transition: var(--transition-fast);
 }
 
 .urgentTaskRow:hover {
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(var(--contrast-surface-rgb), 0.03);
   border-color: rgba(239, 68, 68, 0.3);
 }
 
@@ -229,7 +229,7 @@
 .projectTag {
   font-size: 0.75rem;
   color: var(--text-muted);
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(var(--contrast-surface-rgb), 0.03);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -261,7 +261,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background-color: rgba(255, 255, 255, 0.01);
+  background-color: rgba(var(--contrast-surface-rgb), 0.01);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
 }
@@ -311,7 +311,7 @@
 .progressBar {
   width: 80px;
   height: 6px;
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: rgba(var(--contrast-surface-rgb), 0.04);
   border-radius: 3px;
   overflow: hidden;
 }

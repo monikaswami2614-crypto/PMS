@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import styles from './page.module.css';
 
-type RequirementStatus = 'pending' | 'missing' | 'checked';
+type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
 
 type MatchedFile = {
   id: string;
@@ -95,7 +95,21 @@ type FileContextMenu = {
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
-const statusOptions: RequirementStatus[] = ['pending', 'missing', 'checked'];
+const selectedProjectStorageKey = 'checklist-review-selected-project';
+const selectedProjectChangeEvent = 'checklist-review-project-change';
+
+const subscribeToSelectedProject = (onStoreChange: () => void) => {
+  window.addEventListener('storage', onStoreChange);
+  window.addEventListener(selectedProjectChangeEvent, onStoreChange);
+
+  return () => {
+    window.removeEventListener('storage', onStoreChange);
+    window.removeEventListener(selectedProjectChangeEvent, onStoreChange);
+  };
+};
+
+const getSelectedProjectSnapshot = () => window.localStorage.getItem(selectedProjectStorageKey) ?? '';
+const statusOptions: RequirementStatus[] = ['pending', 'missing', 'checked', 'overridden'];
 const emptySheets: Record<FiltrationPhase, SheetFile[]> = { pre: [], final: [] };
 const fileTypeOrder: Record<string, number> = {
   pdf: 0,
@@ -128,7 +142,7 @@ const mainCreditNames: Record<string, string> = {
 export default function ChecklistReviewPage() {
   const { projects } = useProjects();
   const reviewProjects = useMemo(() => projects.filter((project) => project.id !== 'all'), [projects]);
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const selectedProjectId = useSyncExternalStore(subscribeToSelectedProject, getSelectedProjectSnapshot, () => '');
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -148,7 +162,9 @@ export default function ChecklistReviewPage() {
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenu | null>(null);
   const [activeFileInfo, setActiveFileInfo] = useState<SheetFile | null>(null);
 
-  const effectiveSelectedProjectId = selectedProjectId || reviewProjects[0]?.id || '';
+  const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
+    ? selectedProjectId
+    : reviewProjects[0]?.id || '';
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) return;
@@ -190,8 +206,8 @@ export default function ChecklistReviewPage() {
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
   const preRequirements = review?.items.flatMap((item) => item.preRequirements) ?? [];
   const finalRequirements = review?.items.flatMap((item) => item.finalRequirements) ?? [];
-  const completedPre = preRequirements.filter((requirement) => requirement.status === 'checked').length;
-  const completedFinal = finalRequirements.filter((requirement) => requirement.status === 'checked').length;
+  const completedPre = preRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
+  const completedFinal = finalRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
 
   const updateRequirementStatus = async (requirementId: string, phase: 'pre' | 'final', status: RequirementStatus) => {
     if (!review) return;
@@ -629,7 +645,10 @@ export default function ChecklistReviewPage() {
           <ClipboardCheck size={18} className={styles.toolbarIcon} />
           <select
             value={effectiveSelectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
+            onChange={(event) => {
+              window.localStorage.setItem(selectedProjectStorageKey, event.target.value);
+              window.dispatchEvent(new Event(selectedProjectChangeEvent));
+            }}
             className={styles.projectSelect}
           >
             {reviewProjects.length === 0 && <option value="">No projects available</option>}

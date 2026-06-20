@@ -37,7 +37,7 @@ type ReviewChecklistRow = ParsedChecklistItem & {
   finalRequirements: ReviewRequirement[];
 };
 
-type RequirementStatus = 'pending' | 'missing' | 'checked';
+type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
 
 type ReviewRequirement = {
   id: string;
@@ -86,6 +86,12 @@ type AiFilteredFile = {
   fileId: string;
   matchScore: number;
   matchReason: string;
+};
+
+type ClientDataMatch = AiFilteredFile & {
+  groupId: string;
+  requirementId: string;
+  requirementName: string;
 };
 
 const findWorkbookPath = async (folderPath: string): Promise<string> => {
@@ -502,7 +508,7 @@ const createAiSuggestedName = (file: MatchedFile, creditName: string, requiremen
 };
 
 const normalizeStatus = (value: unknown, autoStatus: RequirementStatus): RequirementStatus => {
-  if (value === 'pending' || value === 'missing' || value === 'checked') return value;
+  if (value === 'pending' || value === 'missing' || value === 'checked' || value === 'overridden') return value;
   return autoStatus;
 };
 
@@ -768,7 +774,9 @@ export const getChecklistReview = async (req: Request, res: Response): Promise<v
           text: requirement.text,
           pointNumber: requirement.pointNumber,
           matched,
-          status: normalizeStatus(manualStatus, matchResult.status),
+          status: manualStatus
+            ? normalizeStatus(manualStatus, matchResult.status)
+            : matchResult.status === 'missing' ? 'missing' : 'checked',
           matchedFiles,
         };
       };
@@ -897,19 +905,19 @@ export const updateChecklistReviewStatus = async (req: Request, res: Response): 
       finalCertificationStatus?: RequirementStatus;
     } = {};
 
-    if (nextStatus && !['pending', 'missing', 'checked'].includes(nextStatus)) {
-      res.status(400).json({ error: 'Status must be pending, missing, or checked' });
+    if (nextStatus && !['pending', 'missing', 'checked', 'overridden'].includes(nextStatus)) {
+      res.status(400).json({ error: 'Status must be pending, missing, checked, or overridden' });
       return;
     }
 
     if (nextStatus && phase === 'pre') {
       data.preCertificationStatus = nextStatus;
-      data.preCertificationChecked = nextStatus === 'checked';
+      data.preCertificationChecked = nextStatus === 'checked' || nextStatus === 'overridden';
     }
 
     if (nextStatus && phase === 'final') {
       data.finalCertificationStatus = nextStatus;
-      data.finalCertificationChecked = nextStatus === 'checked';
+      data.finalCertificationChecked = nextStatus === 'checked' || nextStatus === 'overridden';
     }
 
     if (typeof preCertificationChecked === 'boolean') data.preCertificationChecked = preCertificationChecked;
@@ -1053,6 +1061,88 @@ export const filterChecklistFilesByRequirement = async (req: Request, res: Respo
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to apply AI filter' });
+  }
+};
+
+export const matchClientDataToRequirements = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { projectId } = req.params;
+    const { files, groups } = req.body as {
+      files?: Array<{ id?: string }>;
+      groups?: Array<{
+        id?: string;
+        requirements?: Array<{ id?: string; requirementName?: string }>;
+      }>;
+    };
+
+    if (!Array.isArray(files) || files.length === 0 || !Array.isArray(groups) || groups.length === 0) {
+      res.json({ message: 'Client data AI matching completed', data: [] });
+      return;
+    }
+
+    const preparedGroups = groups
+      .filter((group): group is { id: string; requirements: Array<{ id?: string; requirementName?: string }> } => (
+        Boolean(group.id) && Array.isArray(group.requirements)
+      ))
+      .map((group) => ({
+        id: group.id,
+        requirements: group.requirements
+          .filter((requirement) => Boolean(requirement.id && requirement.requirementName?.trim()))
+          .map((requirement) => ({
+            id: requirement.id as string,
+            name: requirement.requirementName as string,
+            tokens: tokenize(requirement.requirementName as string),
+          }))
+          .filter((requirement) => requirement.tokens.length > 0),
+      }));
+
+    const fileIds = Array.from(new Set(files.map((file) => file.id).filter((id): id is string => Boolean(id))));
+    const storedFiles = await prisma.file.findMany({
+      where: { projectId, id: { in: fileIds } },
+      select: { id: true, name: true, relativePath: true, path: true, extension: true, size: true },
+    });
+
+    const analyzedFiles = await Promise.all(storedFiles.map(async (file) => {
+      const matchedFile: MatchedFile = { ...file };
+      const understanding = await inferDocumentUnderstanding(matchedFile, { deep: true });
+      return { file: matchedFile, searchText: buildFileUnderstandingSearchText(matchedFile, understanding) };
+    }));
+
+    const matches: ClientDataMatch[] = [];
+    for (const group of preparedGroups) {
+      for (const { file, searchText } of analyzedFiles) {
+        const candidates = group.requirements
+          .map((requirement) => {
+            const matchedTokens = requirement.tokens.filter((token) => searchText.includes(token));
+            return {
+              ...requirement,
+              matchedTokens,
+              score: Math.round((matchedTokens.length / requirement.tokens.length) * 100),
+            };
+          })
+          .filter((requirement) => (
+            requirement.matchedTokens.length >= Math.min(requirement.tokens.length, 2)
+            && requirement.score >= 50
+          ))
+          .sort((first, second) => second.score - first.score);
+
+        const bestMatch = candidates[0];
+        if (!bestMatch) continue;
+
+        matches.push({
+          groupId: group.id,
+          fileId: file.id,
+          requirementId: bestMatch.id,
+          requirementName: bestMatch.name,
+          matchScore: bestMatch.score,
+          matchReason: `AI matched ${bestMatch.matchedTokens.length}/${bestMatch.tokens.length} requirement keywords`,
+        });
+      }
+    }
+
+    res.json({ message: 'Client data AI matching completed', data: matches });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to match client data' });
   }
 };
 

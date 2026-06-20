@@ -23,6 +23,8 @@ export default function LoginPage() {
   const isSetupMode = !savedPassword;
 
   useEffect(() => {
+    const savedTheme = window.localStorage.getItem('pms-theme');
+    if (savedTheme) document.body.dataset.theme = savedTheme;
     setUserId(window.localStorage.getItem(USER_ID_KEY) ?? '');
     setSavedPassword(window.localStorage.getItem(PASSWORD_KEY));
   }, []);
