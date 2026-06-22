@@ -20,7 +20,7 @@ type ApiProject = {
 };
 
 type Requirement = {
-  status: 'pending' | 'missing' | 'checked';
+  status: 'pending' | 'missing' | 'checked' | 'overridden';
   text: string;
   matchedFiles: MatchedFile[];
 };
@@ -151,8 +151,10 @@ const getCategoryProgress = (items: ChecklistReview['items'], projectType: 'NB' 
 
   items.forEach((item) => {
     const category = getCategoryInfo(item, projectType);
-    const requirements = [...item.preRequirements, ...item.finalRequirements];
-    const checked = requirements.filter((requirement) => requirement.status === 'checked').length;
+    const requirements = item.preRequirements;
+    const checked = requirements.filter((requirement) => (
+      requirement.status === 'checked' || requirement.status === 'overridden'
+    )).length;
     const existing = categories.get(category.key)!;
     categories.set(category.key, {
       ...existing,
@@ -176,16 +178,15 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
     const review = payload.data as ChecklistReview;
     const preRequirements = review.items.flatMap((item) => item.preRequirements);
     const finalRequirements = review.items.flatMap((item) => item.finalRequirements);
-    const preChecked = preRequirements.filter((requirement) => requirement.status === 'checked').length;
-    const finalChecked = finalRequirements.filter((requirement) => requirement.status === 'checked').length;
-    const total = preRequirements.length + finalRequirements.length;
-    const checked = preChecked + finalChecked;
-    const progressPercent = total > 0 ? Math.round((checked / total) * 100) : 0;
+    const isCompleted = (requirement: Requirement) => requirement.status === 'checked' || requirement.status === 'overridden';
+    const preChecked = preRequirements.filter(isCompleted).length;
+    const finalChecked = finalRequirements.filter(isCompleted).length;
+    const progressPercent = preRequirements.length > 0 ? Math.round((preChecked / preRequirements.length) * 100) : 0;
     const stage = project.checklistStage === 'FINAL_SUBMISSION' ? 'FINAL_SUBMISSION' : getAutoStage(progressPercent);
     const categoryProgress = getCategoryProgress(review.items, review.project.type);
     const checkedRequirements = review.items.flatMap((item) => [
       ...item.preRequirements
-        .filter((requirement) => requirement.status === 'checked')
+        .filter(isCompleted)
         .map((requirement) => ({
           id: `${requirement.text}-pre`,
           creditName: item.creditName,
@@ -195,7 +196,7 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
           matchedFiles: requirement.matchedFiles || [],
         })),
       ...item.finalRequirements
-        .filter((requirement) => requirement.status === 'checked')
+        .filter(isCompleted)
         .map((requirement) => ({
           id: `${requirement.text}-final`,
           creditName: item.creditName,
@@ -256,7 +257,32 @@ export default function ProjectsPage() {
       const payload = await response.json();
       const projects = (payload.data || []) as ApiProject[];
       const mappedProjects = await Promise.all(projects.map(mapProjectWithReview));
-      setBoardProjects(mappedProjects);
+      const reconciledProjects = [...mappedProjects];
+
+      for (const project of mappedProjects) {
+        if (project.checklistStage !== 'FINAL_SUBMISSION' || project.progressPercent >= 100) continue;
+
+        const shouldMoveBack = window.confirm(
+          `${project.name} is now ${project.progressPercent}% complete. Move it back from Final Submission to Review Projects?`
+        );
+        if (!shouldMoveBack) continue;
+
+        const stageResponse = await fetch(`${apiBase}/api/projects/${project.id}/stage/review/public`, {
+          method: 'PATCH',
+        });
+        if (!stageResponse.ok) throw new Error(`Failed to move ${project.name} back to Review Projects`);
+
+        const projectIndex = reconciledProjects.findIndex((item) => item.id === project.id);
+        if (projectIndex >= 0) {
+          reconciledProjects[projectIndex] = {
+            ...reconciledProjects[projectIndex],
+            checklistStage: 'REVIEW',
+            stage: 'REVIEW',
+          };
+        }
+      }
+
+      setBoardProjects(reconciledProjects);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project activity board');
     } finally {

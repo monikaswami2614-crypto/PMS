@@ -173,6 +173,23 @@ export const moveProjectToFinalSubmission = async (req: AuthRequest, res: Respon
   }
 };
 
+export const moveProjectToReview = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const project = await prisma.project.update({
+      where: { id },
+      data: { checklistStage: 'REVIEW' },
+    });
+
+    res.json({
+      message: 'Project moved back to review',
+      data: mapProject(project),
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to move project back to review' });
+  }
+};
+
 
 export const getPublicProjectTree = async (req: AuthRequest, res: Response): Promise<void> => {
   try {

@@ -61,7 +61,7 @@ type SheetFile = FiltrationFile & {
 
 type SubmissionMode = 'first' | 'second';
 type FileTypeFilter = 'all' | 'pdf' | 'doc' | 'excel' | 'autocad' | 'photos' | 'other';
-type ClientDataFileFilter = 'all' | 'pdf' | 'doc' | 'excel' | 'autocad' | 'other';
+type ClientDataFileFilter = 'all' | 'pdf' | 'doc' | 'excel' | 'autocad' | 'jpg' | 'png' | 'pak' | 'backup' | 'archive' | 'other';
 type FileActionScope = 'filtration' | 'supporting' | 'final';
 type SelectableFileScope = 'filtration' | 'supporting' | 'ai-filter';
 type CreditViewMode = 'scrolling' | 'stepwise';
@@ -468,7 +468,15 @@ export default function CertificationFiltrationPage() {
     if (clientDataFileFilter === 'doc') return ['doc', 'docx'].includes(extension);
     if (clientDataFileFilter === 'excel') return ['xls', 'xlsx', 'xlsm', 'csv'].includes(extension);
     if (clientDataFileFilter === 'autocad') return ['dwg', 'dxf'].includes(extension);
-    return !['pdf', 'doc', 'docx', 'xls', 'xlsx', 'xlsm', 'csv', 'dwg', 'dxf'].includes(extension);
+    if (clientDataFileFilter === 'jpg') return ['jpg', 'jpeg'].includes(extension);
+    if (clientDataFileFilter === 'png') return extension === 'png';
+    if (clientDataFileFilter === 'pak') return extension === 'pak';
+    if (clientDataFileFilter === 'backup') return ['bak', 'backup'].includes(extension);
+    if (clientDataFileFilter === 'archive') return ['zip', 'rar', '7z', 'tar', 'gz'].includes(extension);
+    return ![
+      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'xlsm', 'csv', 'dwg', 'dxf',
+      'jpg', 'jpeg', 'png', 'pak', 'bak', 'backup', 'zip', 'rar', '7z', 'tar', 'gz',
+    ].includes(extension);
   };
 
   const hasVisibleClientFiles = (folder: ProjectTreeFolder): boolean => (
@@ -540,6 +548,16 @@ export default function CertificationFiltrationPage() {
       || getCreditTitle(group).toLowerCase().includes(query)
     ));
   })();
+
+  const moveSelectedClientFiles = () => {
+    if (creditViewMode === 'stepwise') {
+      const visibleCredit = visibleGroups[Math.min(activeCreditIndex, visibleGroups.length - 1)];
+      if (visibleCredit) moveClientFilesToCredit(visibleCredit);
+      return;
+    }
+
+    setIsCreditPickerOpen(true);
+  };
 
   useEffect(() => {
     setActiveCreditIndex(0);
@@ -700,6 +718,34 @@ export default function CertificationFiltrationPage() {
     return 'missing';
   };
 
+  const updateManualRequirementOverride = async (
+    requirement: FiltrationRequirement,
+    selectionKey: string,
+    checked: boolean
+  ) => {
+    const previousValue = Object.prototype.hasOwnProperty.call(manuallyCheckedRequirementIds, selectionKey)
+      ? manuallyCheckedRequirementIds[selectionKey]
+      : requirement.status === 'overridden';
+
+    setManuallyCheckedRequirementIds((current) => ({ ...current, [selectionKey]: checked }));
+
+    try {
+      const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/items/${requirement.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase, status: checked ? 'overridden' : 'missing' }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || 'Failed to save requirement override');
+      }
+    } catch (err) {
+      setManuallyCheckedRequirementIds((current) => ({ ...current, [selectionKey]: previousValue }));
+      setError(err instanceof Error ? err.message : 'Failed to save requirement override');
+    }
+  };
+
   const getAvailableFiltrationFiles = (group: FiltrationGroup): SheetFile[] => {
     const stagedKeys = new Set([...getSupportingFiles(group), ...getSubmissionFiles(group)].map((file) => file.clientId));
     const fileTypeFilter = fileTypeFilters[group.id] ?? 'all';
@@ -824,61 +870,6 @@ export default function CertificationFiltrationPage() {
 
   const openFileEditor = (fileId: string) => {
     window.open(`/files/editor/${fileId}`, '_blank', 'noopener,noreferrer');
-  };
-
-  const runAiFilter = async (group: FiltrationGroup, files: SheetFile[]) => {
-    setAiFilters((current) => ({
-      ...current,
-      [group.id]: { groupId: group.id, isLoading: true, error: '', files: [] },
-    }));
-    clearSelection(group, 'ai-filter');
-
-    try {
-      const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/files/ai-filter`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creditId: group.creditName,
-          creditName: group.subCreditName,
-          requirement: group.requirements.map((requirement) => requirement.requirementName).filter(Boolean).join('\n'),
-          files: files.map((file) => ({ id: file.id })),
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || 'Failed to apply AI filter');
-      }
-
-      const payload = await response.json();
-      const matchedById = new Map<string, { fileId: string; matchScore?: number; matchReason?: string }>(
-        (payload.data || []).map((file: { fileId: string; matchScore?: number; matchReason?: string }) => [file.fileId, file])
-      );
-      const matchedFiles = files
-        .filter((file) => matchedById.has(file.id))
-        .map((file) => {
-          const match = matchedById.get(file.id);
-          return {
-            ...file,
-            matchConfidence: match?.matchScore ?? file.matchConfidence,
-            matchReason: match?.matchReason ?? file.matchReason,
-          };
-        });
-      setAiFilters((current) => ({
-        ...current,
-        [group.id]: { groupId: group.id, isLoading: false, error: '', files: matchedFiles },
-      }));
-    } catch (err) {
-      setAiFilters((current) => ({
-        ...current,
-        [group.id]: {
-          groupId: group.id,
-          isLoading: false,
-          error: err instanceof Error ? err.message : 'Failed to apply AI filter',
-          files: [],
-        },
-      }));
-    }
   };
 
   const moveSelectedAiFilesToSupporting = (group: FiltrationGroup) => {
@@ -1074,7 +1065,10 @@ export default function CertificationFiltrationPage() {
                 {group.requirements.map((requirement) => {
                   const isMatched = isRequirementSatisfied(requirement, groupFinalFiles);
                   const selectionKey = getSelectionKey(requirement.id);
-                  const isManuallyChecked = !isMatched && Boolean(manuallyCheckedRequirementIds[selectionKey]);
+                  const hasLocalOverride = Object.prototype.hasOwnProperty.call(manuallyCheckedRequirementIds, selectionKey);
+                  const isManuallyChecked = !isMatched && (
+                    hasLocalOverride ? manuallyCheckedRequirementIds[selectionKey] : requirement.status === 'overridden'
+                  );
                   const colorClass = isManuallyChecked
                     ? styles.requirementManuallyChecked
                     : isMatched
@@ -1088,10 +1082,7 @@ export default function CertificationFiltrationPage() {
                         checked={isMatched || isManuallyChecked}
                         onChange={(event) => {
                           if (isMatched) return;
-                          setManuallyCheckedRequirementIds((current) => ({
-                            ...current,
-                            [selectionKey]: event.target.checked,
-                          }));
+                          updateManualRequirementOverride(requirement, selectionKey, event.target.checked);
                         }}
                         aria-label={`${isMatched ? 'Matched' : 'Manually select'} requirement: ${requirement.requirementName}`}
                       />
@@ -1148,10 +1139,6 @@ export default function CertificationFiltrationPage() {
                 <option value="photos">Photos</option>
                 <option value="other">Other Files</option>
               </select>
-              <button type="button" onClick={() => runAiFilter(group, availableFiles)} disabled={availableFiles.length === 0 || aiFilter?.isLoading}>
-                {aiFilter?.isLoading ? <Loader2 size={14} className={styles.loadingIcon} /> : <Sparkles size={14} />}
-                AI Filter
-              </button>
               <button type="button" className={styles.moveButton} onClick={() => moveSelectedToSupporting(group)} disabled={selectedCount(group, 'filtration') === 0}>
                 Move Selected <ArrowRight size={14} />
               </button>
@@ -1473,8 +1460,8 @@ export default function CertificationFiltrationPage() {
             <button
               type="button"
               className={styles.clientMoveButton}
-              disabled={selectedClientFileCount === 0 || !filtrationData?.groups.length}
-              onClick={() => setIsCreditPickerOpen(true)}
+              disabled={selectedClientFileCount === 0 || !filtrationData?.groups.length || (creditViewMode === 'stepwise' && visibleGroups.length === 0)}
+              onClick={moveSelectedClientFiles}
             >
               Move Selected ({selectedClientFileCount})
             </button>
@@ -1493,6 +1480,11 @@ export default function CertificationFiltrationPage() {
               <option value="excel">Excel</option>
               <option value="doc">DOC</option>
               <option value="pdf">PDF</option>
+              <option value="jpg">JPG / JPEG</option>
+              <option value="png">PNG</option>
+              <option value="pak">PAK</option>
+              <option value="backup">Backup (BAK)</option>
+              <option value="archive">Archives</option>
               <option value="other">Other</option>
             </select>
             <span>{visibleClientFileCount} files</span>

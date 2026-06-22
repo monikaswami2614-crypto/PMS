@@ -12,6 +12,7 @@ import {
   getPublicProjects,
   getPublicProjectTree,
   moveProjectToFinalSubmission,
+  moveProjectToReview,
 } from '../controllers/projectController.js';
 
 const router: Router = express.Router();
@@ -20,6 +21,7 @@ const router: Router = express.Router();
 router.get('/public', getPublicProjects);
 router.post('/import/public', importPublicProject);
 router.patch('/:id/stage/final-submission/public', moveProjectToFinalSubmission);
+router.patch('/:id/stage/review/public', moveProjectToReview);
 router.get('/:id/tree/public', getPublicProjectTree);
 
 // Protected routes

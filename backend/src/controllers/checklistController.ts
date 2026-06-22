@@ -507,9 +507,10 @@ const createAiSuggestedName = (file: MatchedFile, creditName: string, requiremen
   return `${creditCode}_${role}.${extension}`;
 };
 
-const normalizeStatus = (value: unknown, autoStatus: RequirementStatus): RequirementStatus => {
-  if (value === 'pending' || value === 'missing' || value === 'checked' || value === 'overridden') return value;
-  return autoStatus;
+const deriveFiltrationStatus = (matchedFiles: MatchedFile[], manualStatus: unknown): RequirementStatus => {
+  if (matchedFiles.length > 0) return 'checked';
+  if (manualStatus === 'overridden') return 'overridden';
+  return 'missing';
 };
 
 const formatKeywords = (keywords: unknown): string => {
@@ -781,7 +782,10 @@ export const getChecklistReview = async (req: Request, res: Response): Promise<v
       };
 
       const mapRequirement = async (requirement: ReviewRequirement, phase: 'pre' | 'final') => {
-        const matchResult = await getMatchedFiles(requirement.text, scopedFilesByPhase[phase]);
+        const submissionFiles = scopedFilesByPhase[phase].filter((file) => (
+          getCreditFolderDepth(file, item.creditName) === 0
+        ));
+        const matchResult = await getMatchedFiles(requirement.text, submissionFiles);
         const matchedFiles = matchResult.matchedFiles;
         const matched = matchedFiles.length > 0;
         const status = statusByItemId.get(requirement.id);
@@ -792,9 +796,7 @@ export const getChecklistReview = async (req: Request, res: Response): Promise<v
           text: requirement.text,
           pointNumber: requirement.pointNumber,
           matched,
-          status: manualStatus
-            ? normalizeStatus(manualStatus, matchResult.status)
-            : matchResult.status === 'missing' ? 'missing' : 'checked',
+          status: deriveFiltrationStatus(matchedFiles, manualStatus),
           matchedFiles,
         };
       };
@@ -834,7 +836,7 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
       return;
     }
 
-    const { project, type, items } = await getProjectReviewContext(projectId);
+    const { project, type, items, statusByItemId } = await getProjectReviewContext(projectId);
 
     if (!project || !type) {
       res.status(404).json({ error: 'Project not found' });
@@ -847,6 +849,7 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
     }
 
     const collectionKey = phase === 'pre' ? 'preRequirements' : 'finalRequirements';
+    const manualStatusKey = phase === 'pre' ? 'preCertificationStatus' : 'finalCertificationStatus';
     const groups = (await Promise.all(items
       .map(async (item) => {
         const creditFiles = await getFilesForChecklistCredit(projectId, item);
@@ -857,7 +860,10 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
         const requirements = await Promise.all(item[collectionKey]
           .map(async (requirement) => {
             const matchResult = await getMatchedFiles(requirement.text, submissionScopedFiles);
-            const status = matchResult.status;
+            const status = deriveFiltrationStatus(
+              matchResult.matchedFiles,
+              statusByItemId.get(requirement.id)?.[manualStatusKey]
+            );
 
             return {
               id: requirement.id,
