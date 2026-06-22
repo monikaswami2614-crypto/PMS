@@ -216,8 +216,7 @@ export default function CertificationFiltrationPage() {
   const [aiMatchedClientFiles, setAiMatchedClientFiles] = useState<SheetFile[]>([]);
   const [isClientAiMatching, setIsClientAiMatching] = useState(false);
   const [clientAiError, setClientAiError] = useState('');
-  const [requirementSelections, setRequirementSelections] = useState<Record<string, boolean>>({});
-  const [manuallyCheckedRequirements, setManuallyCheckedRequirements] = useState<Record<string, boolean>>({});
+  const [manuallyCheckedRequirementIds, setManuallyCheckedRequirementIds] = useState<Record<string, boolean>>({});
   const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
@@ -530,54 +529,6 @@ export default function CertificationFiltrationPage() {
     </div>
   );
 
-  const getCreditStatus = (group?: FiltrationGroup | null): RequirementStatus => {
-    if (!group) return 'missing';
-    if (group.requirements.length > 0 && group.requirements.every(isRequirementChecked)) return 'checked';
-    if (group.requirements.some(isRequirementChecked)) return 'pending';
-    return 'missing';
-  };
-
-  const getRequirementSelectionKey = (requirementId: string) => (
-    `${effectiveSelectedProjectId}-${phase}-${requirementId}`
-  );
-
-  const isRequirementChecked = (requirement: FiltrationRequirement) => {
-    const key = getRequirementSelectionKey(requirement.id);
-    if (Object.prototype.hasOwnProperty.call(requirementSelections, key)) return requirementSelections[key];
-    return requirement.status !== 'missing';
-  };
-
-  const setRequirementChecked = async (requirement: FiltrationRequirement, checked: boolean) => {
-    const key = getRequirementSelectionKey(requirement.id);
-    setRequirementSelections((current) => ({ ...current, [key]: checked }));
-    setManuallyCheckedRequirements((current) => ({ ...current, [key]: checked }));
-
-    try {
-      const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/items/${requirement.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase, status: checked ? 'overridden' : 'missing' }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || 'Failed to synchronize requirement status');
-      }
-    } catch (err) {
-      setRequirementSelections((current) => {
-        const next = { ...current };
-        delete next[key];
-        return next;
-      });
-      setManuallyCheckedRequirements((current) => {
-        const next = { ...current };
-        delete next[key];
-        return next;
-      });
-      setError(err instanceof Error ? err.message : 'Failed to synchronize requirement status');
-    }
-  };
-
   const visibleGroups = (() => {
     const query = creditSearch.trim().toLowerCase();
     const groups = filtrationData?.groups ?? [];
@@ -731,6 +682,23 @@ export default function CertificationFiltrationPage() {
       )),
     ]))
   );
+
+  const isRequirementSatisfied = (requirement: FiltrationRequirement, submissionFiles: SheetFile[]): boolean => {
+    const matchedFileIds = new Set(requirement.matchedFiles.map((file) => file.id));
+
+    return submissionFiles.some((file) => (
+      matchedFileIds.has(file.id)
+      || (file.requirementId === requirement.id && typeof file.matchConfidence === 'number')
+    ));
+  };
+
+  const getCreditStatus = (group?: FiltrationGroup | null): RequirementStatus => {
+    if (!group) return 'missing';
+    const submissionFiles = getSubmissionFiles(group);
+    if (group.requirements.length > 0 && group.requirements.every((requirement) => isRequirementSatisfied(requirement, submissionFiles))) return 'checked';
+    if (group.requirements.some((requirement) => isRequirementSatisfied(requirement, submissionFiles))) return 'pending';
+    return 'missing';
+  };
 
   const getAvailableFiltrationFiles = (group: FiltrationGroup): SheetFile[] => {
     const stagedKeys = new Set([...getSupportingFiles(group), ...getSubmissionFiles(group)].map((file) => file.clientId));
@@ -1090,6 +1058,7 @@ export default function CertificationFiltrationPage() {
     const aiFilter = aiFilters[group.id];
     const phaseLabel = phase === 'pre' ? 'Pre Certification folder only' : 'Final Certification folder only';
     const submissionLabel = phase === 'pre' ? 'IGBC Pre Submission' : 'IGBC Final Submission';
+    const getSelectionKey = (requirementId: string) => `${effectiveSelectedProjectId}-${phase}-${group.id}-${requirementId}`;
 
     return (
       <section
@@ -1103,12 +1072,12 @@ export default function CertificationFiltrationPage() {
             {group.requirements.length > 0 && (
               <div className={styles.requirementCompletionList}>
                 {group.requirements.map((requirement) => {
-                  const selectionKey = getRequirementSelectionKey(requirement.id);
-                  const isChecked = isRequirementChecked(requirement);
-                  const isManuallyChecked = requirement.status === 'overridden' || Boolean(manuallyCheckedRequirements[selectionKey]);
+                  const isMatched = isRequirementSatisfied(requirement, groupFinalFiles);
+                  const selectionKey = getSelectionKey(requirement.id);
+                  const isManuallyChecked = !isMatched && Boolean(manuallyCheckedRequirementIds[selectionKey]);
                   const colorClass = isManuallyChecked
                     ? styles.requirementManuallyChecked
-                    : isChecked
+                    : isMatched
                       ? styles.requirementChecked
                       : styles.requirementMissing;
 
@@ -1116,9 +1085,15 @@ export default function CertificationFiltrationPage() {
                     <label key={requirement.id} className={`${styles.requirementCompletionItem} ${colorClass}`}>
                       <input
                         type="checkbox"
-                        checked={isChecked}
-                        onChange={(event) => setRequirementChecked(requirement, event.target.checked)}
-                        aria-label={`Mark requirement: ${requirement.requirementName}`}
+                        checked={isMatched || isManuallyChecked}
+                        onChange={(event) => {
+                          if (isMatched) return;
+                          setManuallyCheckedRequirementIds((current) => ({
+                            ...current,
+                            [selectionKey]: event.target.checked,
+                          }));
+                        }}
+                        aria-label={`${isMatched ? 'Matched' : 'Manually select'} requirement: ${requirement.requirementName}`}
                       />
                       <span className={styles.requirementCompletionText}>{requirement.requirementName}</span>
                     </label>

@@ -557,6 +557,24 @@ const isCreditFolderFile = (file: MatchedFile, creditName: string): boolean => {
   });
 };
 
+const getCreditFolderDepth = (file: MatchedFile, creditName: string): number | null => {
+  const creditTokens = getFolderTokens(creditName);
+  if (creditTokens.length === 0) return null;
+
+  const pathParts = (file.relativePath || file.path || '').split(/[\\/]+/).filter(Boolean);
+  const folderParts = pathParts.slice(0, -1);
+  const creditFolderIndex = folderParts.findIndex((part) => {
+    const folderTokens = getFolderTokens(part);
+    if (folderTokens.length < creditTokens.length) return false;
+    return folderTokens.some((_, startIndex) => (
+      creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
+    ));
+  });
+
+  if (creditFolderIndex === -1) return null;
+  return folderParts.length - creditFolderIndex - 1;
+};
+
 const getCreditScopedFiles = (files: MatchedFile[], item: ReviewChecklistRow): MatchedFile[] => {
   return files.filter((file) => isClientDataFile(file) || isCreditFolderFile(file, item.creditName));
 };
@@ -816,7 +834,7 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
       return;
     }
 
-    const { project, type, items, statusByItemId } = await getProjectReviewContext(projectId);
+    const { project, type, items } = await getProjectReviewContext(projectId);
 
     if (!project || !type) {
       res.status(404).json({ error: 'Project not found' });
@@ -829,16 +847,17 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
     }
 
     const collectionKey = phase === 'pre' ? 'preRequirements' : 'finalRequirements';
-    const manualStatusKey = phase === 'pre' ? 'preCertificationStatus' : 'finalCertificationStatus';
-
     const groups = (await Promise.all(items
       .map(async (item) => {
         const creditFiles = await getFilesForChecklistCredit(projectId, item);
         const scopedFiles = creditFiles.filter((file) => getFilePhase(file) === phase);
+        const submissionScopedFiles = uniqueFilesById(scopedFiles.filter((file) => (
+          getCreditFolderDepth(file, item.creditName) === 0
+        )));
         const requirements = await Promise.all(item[collectionKey]
           .map(async (requirement) => {
-            const matchResult = await getMatchedFiles(requirement.text, scopedFiles);
-            const status = normalizeStatus(statusByItemId.get(requirement.id)?.[manualStatusKey], matchResult.status);
+            const matchResult = await getMatchedFiles(requirement.text, submissionScopedFiles);
+            const status = matchResult.status;
 
             return {
               id: requirement.id,
@@ -854,7 +873,7 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
             };
           }));
         const fallbackRequirement = requirements[0];
-        const submissionFiles = uniqueFilesById(scopedFiles.filter((file) => isCreditFolderFile(file, item.creditName)))
+        const submissionFiles = submissionScopedFiles
           .map((file) => ({
             ...file,
             status: fallbackRequirement?.status ?? 'missing',
