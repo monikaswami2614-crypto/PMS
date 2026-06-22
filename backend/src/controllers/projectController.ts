@@ -202,7 +202,7 @@ export const getPublicProjectTree = async (req: AuthRequest, res: Response): Pro
 
     const map = new Map<string, any>();
     for (const f of folders) {
-      map.set(f.id, { id: f.id, name: f.name, path: f.path, relativePath: f.relativePath, children: [], files: f.files.map((file: any) => ({ id: file.id, name: file.name, path: file.path, relativePath: file.relativePath, extension: file.extension, size: file.size })) });
+      map.set(f.id, { id: f.id, name: f.name, path: f.path, relativePath: f.relativePath, children: [], files: f.files.map((file: any) => ({ id: file.id, name: file.name, path: file.path, relativePath: file.relativePath, extension: file.extension, size: file.size, modifiedAt: file.modifiedAt, createdAt: file.createdAt, updatedAt: file.updatedAt })) });
     }
 
     let roots: any[] = [];

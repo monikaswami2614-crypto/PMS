@@ -18,8 +18,8 @@ const app: Express = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((origin) => origin.trim());
 
 const isLocalNetworkOrigin = (origin?: string): boolean => {

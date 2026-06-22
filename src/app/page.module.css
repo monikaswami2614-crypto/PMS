@@ -41,11 +41,143 @@
   color: var(--text-secondary);
 }
 
+.projectSelectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 20px 24px;
+}
+
+.projectSelectors label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.projectSelectors label > span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.projectSelectors select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  background: rgba(var(--surface-rgb), 0.72);
+  font-size: 0.84rem;
+  outline: none;
+}
+
+.projectSelectors select:focus {
+  border-color: var(--primary);
+}
+
+.errorBox,
+.loadingPanel,
+.emptyState {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  background: rgba(var(--surface-rgb), 0.45);
+}
+
+.errorBox {
+  padding: 12px 14px;
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.loadingPanel,
+.emptyState {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+
+.loadingIcon {
+  color: var(--primary);
+  animation: dashboardSpin 0.8s linear infinite;
+}
+
 /* KPI Grid */
 .kpiGrid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
+}
+
+.statusCard {
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px;
+  --status-color: var(--primary);
+}
+
+.statusCardHeader,
+.statusCardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.statusCardHeader {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statusCardHeader svg {
+  color: var(--status-color);
+}
+
+.statusCard > strong {
+  color: var(--text-primary);
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.statusCardFooter {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.stagePill {
+  padding: 4px 7px;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: 999px;
+  color: #c4b5fd;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.miniProgress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(var(--contrast-surface-rgb), 0.06);
+}
+
+.miniProgress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-gradient);
 }
 
 /* Charts Grid */
@@ -88,6 +220,127 @@
   width: 100%;
   height: auto;
   overflow: visible;
+}
+
+.tooltipGroup {
+  cursor: help;
+}
+
+.creditPie {
+  width: 150px;
+  height: 150px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.12);
+}
+
+.creditPie > div {
+  width: 104px;
+  height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-primary);
+}
+
+.creditPie strong {
+  color: var(--text-primary);
+  font-size: 1.35rem;
+}
+
+.creditPie span {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.creditLegend {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.creditLegendItem {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.creditLegendItem > span {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+
+.creditLegendItem div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.creditLegendItem strong {
+  color: var(--text-primary);
+  font-size: 0.76rem;
+}
+
+.creditLegendItem small {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.healthSection {
+  padding: 24px;
+}
+
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.documentCountGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.healthGrid > div {
+  min-width: 0;
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--contrast-surface-rgb), 0.025);
+}
+
+.healthGrid svg {
+  color: var(--primary);
+}
+
+.healthGrid span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.healthGrid strong {
+  color: var(--text-primary);
+  font-size: 1.35rem;
+}
+
+@keyframes dashboardSpin {
+  to { transform: rotate(360deg); }
 }
 
 /* Priority Allocation (Donut Chart) */
@@ -364,14 +617,30 @@
   .chartsGrid {
     grid-template-columns: 1fr;
   }
+  .healthGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .documentCountGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .actionablesGrid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 768px) {
+  .projectSelectors {
+    grid-template-columns: 1fr;
+  }
   .kpiGrid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .healthGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .donutContainer {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .welcomeBanner {
     flex-direction: column;
@@ -382,6 +651,12 @@
 
 @media (max-width: 480px) {
   .kpiGrid {
+    grid-template-columns: 1fr;
+  }
+  .healthGrid {
+    grid-template-columns: 1fr;
+  }
+  .documentCountGrid {
     grid-template-columns: 1fr;
   }
 }

@@ -819,6 +819,22 @@ export const getChecklistReview = async (req: Request, res: Response): Promise<v
           type,
         },
         items: reviewItems,
+        activityHistory: statuses.flatMap((status) => ([
+          status.preCertificationStatus ? {
+            id: `${status.id}-pre`,
+            requirementId: status.checklistItemId,
+            phase: 'pre',
+            status: status.preCertificationStatus,
+            timestamp: status.updatedAt,
+          } : null,
+          status.finalCertificationStatus ? {
+            id: `${status.id}-final`,
+            requirementId: status.checklistItemId,
+            phase: 'final',
+            status: status.finalCertificationStatus,
+            timestamp: status.updatedAt,
+          } : null,
+        ].filter(Boolean))),
       },
     });
   } catch (error) {
@@ -857,6 +873,10 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
         const submissionScopedFiles = uniqueFilesById(scopedFiles.filter((file) => (
           getCreditFolderDepth(file, item.creditName) === 0
         )));
+        const supportingScopedFiles = uniqueFilesById(scopedFiles.filter((file) => {
+          const depth = getCreditFolderDepth(file, item.creditName);
+          return depth !== null && depth > 0;
+        }));
         const requirements = await Promise.all(item[collectionKey]
           .map(async (requirement) => {
             const matchResult = await getMatchedFiles(requirement.text, submissionScopedFiles);
@@ -886,6 +906,12 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
             requirementId: fallbackRequirement?.id ?? `${type}-${phase}-${item.sourceSheet}-${item.sourceRow}-submission`,
             requirementName: fallbackRequirement?.requirementName ?? (item.subCreditName || item.creditName),
           }));
+        const supportingFiles = supportingScopedFiles.map((file) => ({
+          ...file,
+          status: 'pending' as RequirementStatus,
+          requirementId: fallbackRequirement?.id ?? `${type}-${phase}-${item.sourceSheet}-${item.sourceRow}-supporting`,
+          requirementName: fallbackRequirement?.requirementName ?? (item.subCreditName || item.creditName),
+        }));
 
         return {
           id: `${type}-${phase}-${item.sourceSheet}-${item.sourceRow}`,
@@ -893,6 +919,7 @@ export const getChecklistFiltration = async (req: Request, res: Response): Promi
           subCreditName: item.subCreditName,
           requirements,
           submissionFiles,
+          supportingFiles,
         };
       })));
 

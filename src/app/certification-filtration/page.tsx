@@ -142,6 +142,7 @@ const flattenProjectTreeFiles = (folder: ProjectTreeFolder): ProjectTreeFile[] =
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 const selectedProjectStorageKey = 'certification-filtration-selected-project';
 const selectedProjectChangeEvent = 'certification-filtration-project-change';
+const workflowFilesStoragePrefix = 'certification-filtration-workflow-files';
 
 const subscribeToSelectedProject = (onStoreChange: () => void) => {
   window.addEventListener('storage', onStoreChange);
@@ -218,12 +219,40 @@ export default function CertificationFiltrationPage() {
   const [clientAiError, setClientAiError] = useState('');
   const [manuallyCheckedRequirementIds, setManuallyCheckedRequirementIds] = useState<Record<string, boolean>>({});
   const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
+  const [hydratedWorkflowKey, setHydratedWorkflowKey] = useState('');
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
     : reviewProjects[0]?.id || '';
   const selectedProject = reviewProjects.find((project) => project.id === effectiveSelectedProjectId);
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
+  const workflowFilesStorageKey = effectiveSelectedProjectId
+    ? `${workflowFilesStoragePrefix}:${effectiveSelectedProjectId}:${phase}:${submissionMode}`
+    : '';
+
+  useEffect(() => {
+    if (!workflowFilesStorageKey) return;
+
+    try {
+      const savedWorkflow = window.localStorage.getItem(workflowFilesStorageKey);
+      const parsed = savedWorkflow
+        ? JSON.parse(savedWorkflow) as { supportingFiles?: SheetFile[]; finalFiles?: SheetFile[] }
+        : null;
+      setSupportingFiles(parsed?.supportingFiles ?? []);
+      setFinalFiles(parsed?.finalFiles ?? []);
+    } catch {
+      window.localStorage.removeItem(workflowFilesStorageKey);
+      setSupportingFiles([]);
+      setFinalFiles([]);
+    }
+
+    setHydratedWorkflowKey(workflowFilesStorageKey);
+  }, [workflowFilesStorageKey]);
+
+  useEffect(() => {
+    if (!workflowFilesStorageKey || hydratedWorkflowKey !== workflowFilesStorageKey) return;
+    window.localStorage.setItem(workflowFilesStorageKey, JSON.stringify({ supportingFiles, finalFiles }));
+  }, [finalFiles, hydratedWorkflowKey, supportingFiles, workflowFilesStorageKey]);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) {
@@ -315,8 +344,6 @@ export default function CertificationFiltrationPage() {
 
         const payload = await response.json();
         setFiltrationData(payload.data);
-        setSupportingFiles([]);
-        setFinalFiles([]);
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
           setError(err instanceof Error ? err.message : 'Failed to load filtration data');
