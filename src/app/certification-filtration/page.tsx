@@ -199,6 +199,7 @@ export default function CertificationFiltrationPage() {
   const [finalFiles, setFinalFiles] = useState<SheetFile[]>([]);
   const [fileNameOverrides, setFileNameOverrides] = useState<Record<string, string>>({});
   const [activeFileInfo, setActiveFileInfo] = useState<SheetFile | null>(null);
+  const [activeFileInfoCreditId, setActiveFileInfoCreditId] = useState<string | null>(null);
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenu | null>(null);
   const [aiSuggestionPanel, setAiSuggestionPanel] = useState<AiSuggestionPanel | null>(null);
   const [aiFilters, setAiFilters] = useState<Record<string, AiFilterState>>({});
@@ -211,6 +212,7 @@ export default function CertificationFiltrationPage() {
   const [selectedClientFiles, setSelectedClientFiles] = useState<Record<string, boolean>>({});
   const [isCreditPickerOpen, setIsCreditPickerOpen] = useState(false);
   const [clientFiltrationFiles, setClientFiltrationFiles] = useState<SheetFile[]>([]);
+  const [removedFiltrationFileIds, setRemovedFiltrationFileIds] = useState<Record<string, boolean>>({});
   const [aiMatchedClientFiles, setAiMatchedClientFiles] = useState<SheetFile[]>([]);
   const [isClientAiMatching, setIsClientAiMatching] = useState(false);
   const [clientAiError, setClientAiError] = useState('');
@@ -265,6 +267,7 @@ export default function CertificationFiltrationPage() {
       setSelectedClientFiles({});
       setIsCreditPickerOpen(false);
       setClientFiltrationFiles([]);
+      setRemovedFiltrationFileIds({});
       setAiMatchedClientFiles([]);
       setIsClientAiMatching(false);
       setClientAiError('');
@@ -741,6 +744,7 @@ export default function CertificationFiltrationPage() {
 
     return sortFilesForDisplay(uniqueFilesByFileId(uniqueFilesByClientId([...matchedFiles, ...assignedClientFiles])).filter((file) => (
       !stagedKeys.has(file.clientId)
+      && !removedFiltrationFileIds[file.clientId]
       && matchesFileType(file, fileTypeFilter)
     )));
   };
@@ -831,19 +835,15 @@ export default function CertificationFiltrationPage() {
     setFileContextMenu(null);
   };
 
-  const removeFileToPreviousStep = (file: SheetFile, scope: FileActionScope) => {
-    if (scope === 'final') {
-      setFinalFiles((current) => current.filter((item) => item.clientId !== file.clientId));
-      setSupportingFiles((current) => {
-        const existing = new Set(current.map((item) => item.clientId));
-        if (existing.has(file.clientId)) return current;
-        return [...current, { ...file, displayName: getDisplayName(file) }];
-      });
-    }
+  const deleteFileFromSection = (file: SheetFile, scope: FileActionScope) => {
+    if (!window.confirm(`Delete "${getDisplayName(file)}" from this section?`)) return;
 
-    if (scope === 'supporting') {
-      setSupportingFiles((current) => current.filter((item) => item.clientId !== file.clientId));
+    if (scope === 'filtration') {
+      setRemovedFiltrationFileIds((current) => ({ ...current, [file.clientId]: true }));
+      setClientFiltrationFiles((current) => current.filter((item) => item.clientId !== file.clientId));
     }
+    if (scope === 'supporting') setSupportingFiles((current) => current.filter((item) => item.clientId !== file.clientId));
+    if (scope === 'final') setFinalFiles((current) => current.filter((item) => item.clientId !== file.clientId));
 
     setSelectedFiles((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.endsWith(file.clientId))));
     setFileContextMenu(null);
@@ -1029,13 +1029,23 @@ export default function CertificationFiltrationPage() {
         className={`${styles.filtrationFileRow} ${!isSelectable ? styles.finalFileRow : ''}`}
         title={matchSummary || undefined}
         onClick={() => {
+          setActiveFileInfoCreditId(group.id);
           setActiveFileInfo(file);
           setFileContextMenu(null);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
+          const creditCard = event.currentTarget.closest<HTMLElement>('[data-credit-card]');
+          const cardRect = creditCard?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
           setActiveFileInfo(null);
-          setFileContextMenu({ file, group, scope: scope === 'ai-filter' ? 'filtration' : scope, x: event.clientX, y: event.clientY });
+          setActiveFileInfoCreditId(null);
+          setFileContextMenu({
+            file,
+            group,
+            scope: scope === 'ai-filter' ? 'filtration' : scope,
+            x: Math.max(8, Math.min(event.clientX - cardRect.left, cardRect.width - 198)),
+            y: Math.max(8, Math.min(event.clientY - cardRect.top, cardRect.height - 226)),
+          });
         }}
         role="button"
         tabIndex={0}
@@ -1085,6 +1095,7 @@ export default function CertificationFiltrationPage() {
       <section
         key={group.id}
         className={`${styles.certificationCreditCard} ${getCreditColorClass(group)}`}
+        data-credit-card
       >
         <div className={`${styles.currentCreditBar} ${styles.certificationCreditHeader}`}>
           <div>
@@ -1254,12 +1265,91 @@ export default function CertificationFiltrationPage() {
             </section>
           </div>
         </div>
+
+        {fileContextMenu && fileContextMenu.group.id === group.id && (
+          <div
+            className={`${styles.fileContextMenu} ${styles.creditFileContextMenu}`}
+            style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button type="button" onClick={() => updateFileDisplayName(fileContextMenu.file)}>
+              <Edit3 size={14} />
+              Rename file
+            </button>
+            <button type="button" onClick={() => {
+              openFilePreview(fileContextMenu.file.id);
+              setFileContextMenu(null);
+            }}>
+              <ExternalLink size={14} />
+              View file
+            </button>
+            {fileContextMenu.scope === 'filtration' && (
+              <button type="button" onClick={() => moveFileToSupporting(fileContextMenu.file)}>
+                <ArrowRight size={14} />
+                Move to Supporting
+              </button>
+            )}
+            {fileContextMenu.scope === 'supporting' && (
+              <button type="button" onClick={() => moveFileToFinal(fileContextMenu.file)}>
+                <ArrowRight size={14} />
+                Move to IGBC
+              </button>
+            )}
+            <button type="button" onClick={() => openFileEditor(fileContextMenu.file.id)}>
+              <FileText size={14} />
+              Edit file internal data
+            </button>
+            <button type="button" className={styles.dangerMenuItem} onClick={() => deleteFileFromSection(fileContextMenu.file, fileContextMenu.scope)}>
+              <Trash2 size={14} />
+              Delete file
+            </button>
+          </div>
+        )}
+
+        {activeFileInfo && activeFileInfoCreditId === group.id && (
+          <div className={styles.creditFileInfoOverlay} onClick={() => setActiveFileInfo(null)}>
+            <div className={`${styles.fileInfoPopup} glassmorphism`} onClick={(event) => event.stopPropagation()}>
+              <div className={styles.fileInfoHeader}>
+                <h3>File Information</h3>
+                <button type="button" className={styles.closeButton} onClick={() => setActiveFileInfo(null)} aria-label="Close">
+                  <X size={16} />
+                </button>
+              </div>
+              <dl className={styles.fileInfoList}>
+                <div>
+                  <dt>Name</dt>
+                  <dd>{getDisplayName(activeFileInfo)}</dd>
+                </div>
+                <div>
+                  <dt>Address</dt>
+                  <dd>{activeFileInfo.path || activeFileInfo.relativePath || 'Not available'}</dd>
+                </div>
+                <div>
+                  <dt>Requirement</dt>
+                  <dd>{activeFileInfo.requirementName || 'Not available'}</dd>
+                </div>
+                <div>
+                  <dt>Credit</dt>
+                  <dd>{activeFileInfo.creditName} {activeFileInfo.subCreditName ? `- ${activeFileInfo.subCreditName}` : ''}</dd>
+                </div>
+                <div>
+                  <dt>Type</dt>
+                  <dd>{activeFileInfo.extension || getFileExtension(activeFileInfo) || 'Unknown'}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{activeFileInfo.status}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        )}
       </section>
     );
   };
 
   return (
-    <div className={styles.container}>
+    <div className={styles.container} onClick={() => setFileContextMenu(null)}>
       <div className={styles.certificationPageColumns}>
         <main className={styles.certificationMainColumn}>
           <div className={`${styles.toolbar} ${styles.certificationToolbar} glassmorphism`}>
@@ -1476,46 +1566,6 @@ export default function CertificationFiltrationPage() {
         </div>
       )}
 
-      {fileContextMenu && (
-        <div
-          className={styles.fileContextMenu}
-          style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {fileContextMenu.scope === 'filtration' ? (
-            <button type="button" onClick={() => moveFileToSupporting(fileContextMenu.file)}>
-              <ArrowRight size={14} />
-              Move to Supporting
-            </button>
-          ) : (
-            <>
-              <button type="button" onClick={() => updateFileDisplayName(fileContextMenu.file)}>
-                <Edit3 size={14} />
-                Edit file name
-              </button>
-              <button type="button" onClick={() => openFilePreview(fileContextMenu.file.id)}>
-                <ExternalLink size={14} />
-                View file
-              </button>
-              {fileContextMenu.scope === 'supporting' && (
-                <button type="button" onClick={() => moveFileToFinal(fileContextMenu.file)}>
-                  <ArrowRight size={14} />
-                  Move to IGBC
-                </button>
-              )}
-              <button type="button" onClick={() => openFileEditor(fileContextMenu.file.id)}>
-                <FileText size={14} />
-                Edit file internal data
-              </button>
-              <button type="button" className={styles.dangerMenuItem} onClick={() => removeFileToPreviousStep(fileContextMenu.file, fileContextMenu.scope)}>
-                <Trash2 size={14} />
-                Delete file
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
       {aiSuggestionPanel && (
         <div className={styles.fileInfoOverlay} onClick={() => setAiSuggestionPanel(null)}>
           <div className={`${styles.aiSuggestionModal} glassmorphism`} onClick={(event) => event.stopPropagation()}>
@@ -1567,44 +1617,6 @@ export default function CertificationFiltrationPage() {
         </div>
       )}
 
-      {activeFileInfo && (
-        <div className={styles.fileInfoOverlay} onClick={() => setActiveFileInfo(null)}>
-          <div className={`${styles.fileInfoPopup} glassmorphism`} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.fileInfoHeader}>
-              <h3>File Information</h3>
-              <button type="button" className={styles.closeButton} onClick={() => setActiveFileInfo(null)} aria-label="Close">
-                <X size={16} />
-              </button>
-            </div>
-            <dl className={styles.fileInfoList}>
-              <div>
-                <dt>Name</dt>
-                <dd>{getDisplayName(activeFileInfo)}</dd>
-              </div>
-              <div>
-                <dt>Address</dt>
-                <dd>{activeFileInfo.path || activeFileInfo.relativePath || 'Not available'}</dd>
-              </div>
-              <div>
-                <dt>Requirement</dt>
-                <dd>{activeFileInfo.requirementName || 'Not available'}</dd>
-              </div>
-              <div>
-                <dt>Credit</dt>
-                <dd>{activeFileInfo.creditName} {activeFileInfo.subCreditName ? `- ${activeFileInfo.subCreditName}` : ''}</dd>
-              </div>
-              <div>
-                <dt>Type</dt>
-                <dd>{activeFileInfo.extension || getFileExtension(activeFileInfo) || 'Unknown'}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{activeFileInfo.status}</dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
