@@ -3,7 +3,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
-export type TaskPriority = 'high' | 'medium' | 'low';
+export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
+export type DeadlineProjectType = 'NB' | 'GH';
 export type ProjectSourceFilter = 'NB' | 'GREEN_HOMES' | null;
 
 export interface SubTask {
@@ -20,6 +21,10 @@ export interface Task {
   priority: TaskPriority;
   dueDate: string;
   assigneeId: string;
+  assigneeEmail?: string;
+  managerName?: string;
+  managerEmail?: string;
+  projectType?: DeadlineProjectType;
   project: string;
   subtasks: SubTask[];
 }

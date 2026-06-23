@@ -228,7 +228,8 @@
 }
 
 .taskStrip {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   padding: 3px 6px;
@@ -259,7 +260,26 @@
   flex: 1;
 }
 
+.taskMeta {
+  grid-column: 2;
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Priority visual modes */
+.critical {
+  background-color: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+.critical .priorityDot {
+  background-color: #dc2626;
+  box-shadow: 0 0 6px #dc2626;
+}
+
 .high {
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--priority-high);
@@ -270,7 +290,7 @@
 }
 
 .medium {
-  background-color: rgba(249, 115, 22, 0.1);
+  background-color: rgba(249, 115, 22, 0.14);
   color: var(--priority-medium);
 }
 .medium .priorityDot {
@@ -279,12 +299,22 @@
 }
 
 .low {
-  background-color: rgba(6, 182, 212, 0.1);
-  color: var(--priority-low);
+  background-color: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
 }
 .low .priorityDot {
-  background-color: var(--priority-low);
-  box-shadow: 0 0 4px var(--priority-low);
+  background-color: #22c55e;
+  box-shadow: 0 0 4px #22c55e;
+}
+
+.done {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+.done .priorityDot {
+  background-color: #22c55e;
+  box-shadow: 0 0 4px #22c55e;
 }
 
 .moreTasks {
@@ -406,6 +436,75 @@
   color: var(--text-primary);
 }
 
+.priorityField {
+  cursor: default;
+  font-weight: 800;
+}
+
+.priorityField:focus {
+  border-color: var(--border-color);
+  box-shadow: none;
+}
+
+.formError {
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: var(--border-radius-sm);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--priority-high);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
+.detailsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.detailItem {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detailItem span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.detailItem strong,
+.detailNotes {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--surface-rgb), 0.42);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 11px 13px;
+  overflow-wrap: anywhere;
+}
+
+.detailNotes {
+  min-height: 88px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.priorityBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 .fullWidth {
   grid-column: 1 / -1;
 }
@@ -448,6 +547,34 @@
   background: var(--accent-gradient-hover);
 }
 
+.submitBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+}
+
+.deleteDeadlineBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  border-radius: var(--border-radius-sm);
+  padding: 0 18px;
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  font-size: 0.88rem;
+  font-weight: 800;
+  transition: var(--transition-fast);
+}
+
+.deleteDeadlineBtn:hover {
+  color: #ffffff;
+  background: rgba(239, 68, 68, 0.26);
+  border-color: rgba(239, 68, 68, 0.48);
+  transform: translateY(-1px);
+}
+
 @media (max-width: 768px) {
   .calendarHeader {
     align-items: flex-start;
@@ -476,6 +603,9 @@
   .taskTitle {
     display: none; /* Only show dots on small screen calendar */
   }
+  .taskMeta {
+    display: none;
+  }
   .taskStrip {
     width: 14px;
     height: 14px;
@@ -490,13 +620,19 @@
     grid-template-columns: 1fr;
   }
 
+  .detailsGrid {
+    grid-template-columns: 1fr;
+  }
+
   .modalFooter {
     flex-direction: column-reverse;
   }
 
   .cancelBtn,
-  .submitBtn {
+  .submitBtn,
+  .deleteDeadlineBtn {
     width: 100%;
+    justify-content: center;
   }
 }
 
