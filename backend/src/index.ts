@@ -11,6 +11,7 @@ import folderRoutes from './routes/folders.js';
 import checklistRoutes from './routes/checklists.js';
 import fileRoutes from './routes/files.js';
 import notificationRoutes from './routes/notifications.js';
+import activityLogRoutes from './routes/activityLogs.js';
 
 // Load environment variables
 dotenv.config();
@@ -53,6 +54,7 @@ app.use('/api/folders', folderRoutes);
 app.use('/api/checklists', checklistRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/activity-logs', activityLogRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

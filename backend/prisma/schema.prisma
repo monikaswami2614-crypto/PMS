@@ -42,6 +42,7 @@ model Project {
   checklistStatuses              ProjectChecklistStatus[]
   certificationValidationResults CertificationValidationResult[]
   certificationStatuses          ProjectCertificationStatus[]
+  activityLogs                   ActivityLog[]
   createdAt                      DateTime                        @default(now())
   updatedAt                      DateTime                        @updatedAt
 }
@@ -189,6 +190,31 @@ model Task {
   estimatedHours Int       @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  userName    String?
+  userEmail   String?
+  actionType  String
+  moduleName  String
+  projectId   String?
+  projectName String?
+  description String
+  oldValue    Json?
+  newValue    Json?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([userId])
+  @@index([moduleName])
+  @@index([actionType])
 }
 
 enum ValidationType {

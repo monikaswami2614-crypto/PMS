@@ -4,6 +4,7 @@ import jwt, { Secret } from 'jsonwebtoken';
 import { AuthRequest } from '../middleware/auth.js';
 import prisma from '../config/prisma.js';
 import { JWT_CONFIG } from '../config/constants.js';
+import { logActivity } from '../services/activityLogService.js';
 
 const generateToken = (userId: string): string => {
   return jwt.sign({ userId }, JWT_CONFIG.secret as any, {
@@ -91,6 +92,14 @@ export const login = async (req: AuthRequest, res: Response): Promise<void> => {
 
     const token = generateToken(user.id);
 
+    await logActivity({
+      user: { id: user.id, name: user.name, email: user.email },
+      actionType: 'User login',
+      moduleName: 'AUTH',
+      description: `User ${user.email} logged in.`,
+      request: req,
+    });
+
     res.json({
       message: 'Login successful',
       token,
@@ -108,6 +117,14 @@ export const login = async (req: AuthRequest, res: Response): Promise<void> => {
 
 export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    await logActivity({
+      user: req.user,
+      actionType: 'User logout',
+      moduleName: 'AUTH',
+      description: 'User logged out.',
+      request: req,
+    });
+
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Logout failed' });

@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { DeadlineProjectType, getProjectSource, Project, useProjects, Task, TaskPriority, TaskStatus } from '@/context/ProjectContext';
 import { CalendarDays, ChevronLeft, ChevronRight, Layers, Mail, Plus, Tag, Trash2, User, X } from 'lucide-react';
+import { logClientActivity } from '@/utils/activityLog';
 import styles from './page.module.css';
 
 type DeadlineStatus = TaskStatus;
@@ -189,6 +190,14 @@ export default function CalendarPage() {
     if (!selectedTask) return;
 
     deleteTask(selectedTask.id);
+    void logClientActivity({
+      actionType: 'Deadline deleted',
+      moduleName: 'CALENDAR',
+      projectId: selectedTask.project,
+      projectName: selectedTask.title,
+      description: `Deadline deleted for "${selectedTask.title}".`,
+      oldValue: selectedTask,
+    });
     handleCloseDetails();
   };
 
@@ -264,8 +273,25 @@ export default function CalendarPage() {
     try {
       if (selectedTask) {
         updateTask({ ...selectedTask, ...projectDeadline });
+        void logClientActivity({
+          actionType: 'Deadline updated',
+          moduleName: 'CALENDAR',
+          projectId,
+          projectName,
+          description: `Deadline updated for "${projectName}".`,
+          oldValue: selectedTask,
+          newValue: projectDeadline,
+        });
       } else {
         addTask(projectDeadline);
+        void logClientActivity({
+          actionType: 'Deadline created',
+          moduleName: 'CALENDAR',
+          projectId,
+          projectName,
+          description: `Deadline created for "${projectName}".`,
+          newValue: projectDeadline,
+        });
       }
 
       handleCloseModal();

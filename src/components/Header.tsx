@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Bell, CheckCircle2, Clock3, Palette, Search, Plus, Settings, SlidersHorizontal, User, X } from 'lucide-react';
+import { Bell, CheckCircle2, Clock3, History, Palette, Search, Plus, Settings, SlidersHorizontal, User, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import CreateNewProjectModal from './CreateNewProjectModal';
 import styles from './Header.module.css';
@@ -12,7 +12,7 @@ type SizePreference = 'compact' | 'default' | 'comfortable';
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
-  const { selectedProject, projects, tasks, sourceFilter } = useProjects();
+  const { selectedProject, projects, tasks, team, sourceFilter } = useProjects();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -187,6 +187,8 @@ export const Header: React.FC = () => {
         return 'Project Calendar';
       case '/team':
         return 'Team Members';
+      case '/activity-logs':
+        return 'Activity Logs';
       default:
         return 'Project Manager';
     }
@@ -325,6 +327,17 @@ export const Header: React.FC = () => {
               >
                 <Settings size={16} />
                 <span>System Preferences</span>
+              </button>
+              <button
+                className={styles.dropdownItem}
+                type="button"
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  router.push('/activity-logs');
+                }}
+              >
+                <History size={16} />
+                <span>Activity Logs</span>
               </button>
               <div className={styles.dropdownDivider} />
               <button className={styles.logoutBtn} type="button" onClick={handleSignOut}>

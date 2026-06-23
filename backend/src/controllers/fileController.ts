@@ -2,13 +2,14 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { Request, Response } from 'express';
 import prisma from '../config/prisma.js';
+import { logActivity } from '../services/activityLogService.js';
 
 export const openFileEditor = async (req: Request, res: Response): Promise<void> => {
   try {
     const { fileId } = req.params;
     const file = await prisma.file.findUnique({
       where: { id: fileId },
-      select: { name: true, path: true },
+      select: { name: true, path: true, projectId: true, project: { select: { name: true } } },
     });
 
     if (!file) {
@@ -17,6 +18,16 @@ export const openFileEditor = async (req: Request, res: Response): Promise<void>
     }
 
     const filePath = path.resolve(file.path);
+    await logActivity({
+      actionType: 'File viewed',
+      moduleName: 'FILES',
+      projectId: file.projectId,
+      projectName: file.project?.name || null,
+      description: `File "${file.name}" viewed.`,
+      metadata: { fileId, filePath },
+      request: req,
+    });
+
     try {
       await fs.access(filePath);
     } catch {

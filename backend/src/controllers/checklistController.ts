@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import path from 'path';
 import XLSX from 'xlsx';
 import prisma from '../config/prisma.js';
+import { logActivity } from '../services/activityLogService.js';
 
 const CHECKLIST_ROOT = process.env.CHECKLIST_ROOT || 'C:\\Users\\monika.swami\\Desktop\\Leed Project';
 const CHECKLIST_REVIEW_ROOT = process.env.CHECKLIST_REVIEW_ROOT || 'C:\\Users\\monika.swami\\Desktop\\Leed Project\\checklist-review';
@@ -980,6 +981,14 @@ export const updateChecklistReviewStatus = async (req: Request, res: Response): 
       return;
     }
 
+    const [previousStatus, project, checklistItem] = await Promise.all([
+      prisma.projectChecklistStatus.findUnique({
+        where: { projectId_checklistItemId: { projectId, checklistItemId: itemId } },
+      }),
+      prisma.project.findUnique({ where: { id: projectId }, select: { id: true, name: true } }),
+      prisma.certificationChecklistItem.findUnique({ where: { id: itemId }, select: { requirementName: true, documentName: true } }),
+    ]);
+
     const status = await prisma.projectChecklistStatus.upsert({
       where: { projectId_checklistItemId: { projectId, checklistItemId: itemId } },
       create: {
@@ -988,6 +997,22 @@ export const updateChecklistReviewStatus = async (req: Request, res: Response): 
         ...data,
       },
       update: data,
+    });
+
+    await logActivity({
+      actionType: phase === 'pre'
+        ? 'Pre certification status changed'
+        : phase === 'final'
+          ? 'Final certification status changed'
+          : 'Checklist status changed',
+      moduleName: 'CHECKLIST REVIEW',
+      projectId,
+      projectName: project?.name || null,
+      description: `Checklist status changed for ${checklistItem?.requirementName || checklistItem?.documentName || itemId}.`,
+      oldValue: previousStatus,
+      newValue: status,
+      metadata: { phase, itemId },
+      request: req,
     });
 
     res.json({ message: 'Checklist status saved', data: status });

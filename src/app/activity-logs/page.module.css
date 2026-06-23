@@ -1,0 +1,284 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.toolbar,
+.filters,
+.tableCard {
+  padding: 18px 22px;
+}
+
+.toolbarTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-primary);
+}
+
+.toolbarTitle h2 {
+  font-size: 1.12rem;
+  font-weight: 800;
+}
+
+.toolbarTitle p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filters label {
+  display: grid;
+  gap: 7px;
+}
+
+.filters span,
+.detailsGrid span,
+.jsonGrid span,
+.modalHeader span {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.filters input,
+.filters select,
+.searchBox {
+  min-height: 38px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--surface-rgb), 0.62);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.filters input,
+.filters select {
+  padding: 9px 11px;
+}
+
+.filters option {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.searchField {
+  grid-column: span 2;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+}
+
+.searchBox svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.searchBox input {
+  min-height: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.clearBtn,
+.pagination button {
+  min-height: 38px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  background: rgba(var(--contrast-surface-rgb), 0.03);
+  font-weight: 800;
+  transition: var(--transition-fast);
+}
+
+.clearBtn:hover,
+.pagination button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.tableCard {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.table th,
+.table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.82rem;
+}
+
+.table th {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.table tbody tr:hover {
+  background: rgba(var(--contrast-surface-rgb), 0.025);
+}
+
+.emptyState {
+  padding: 34px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.pagination button {
+  padding: 0 14px;
+}
+
+.pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 7, 13, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.detailsModal {
+  width: min(860px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: var(--border-radius-lg);
+  background: var(--bg-card);
+  padding: 20px;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modalHeader h2 {
+  margin-top: 5px;
+  color: var(--text-primary);
+  font-size: 1.15rem;
+}
+
+.modalHeader button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+}
+
+.modalHeader button:hover {
+  color: var(--text-primary);
+  background: rgba(var(--contrast-surface-rgb), 0.06);
+}
+
+.detailsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.detailsGrid div {
+  display: grid;
+  gap: 7px;
+}
+
+.detailsGrid strong {
+  min-height: 40px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--surface-rgb), 0.42);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.jsonGrid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.jsonGrid label {
+  display: grid;
+  gap: 7px;
+}
+
+.jsonGrid pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-secondary);
+  padding: 12px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .filters,
+  .detailsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .searchField {
+    grid-column: auto;
+  }
+}

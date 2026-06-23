@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { EmailConfigurationError, sendMail } from '../services/emailService.js';
+import { logActivity } from '../services/activityLogService.js';
 
 interface ProjectAssignmentBody {
   assigneeEmail?: string;
@@ -82,9 +83,25 @@ export const sendProjectAssignmentEmail = async (req: Request, res: Response): P
 
     try {
       await sendMail({ to: assigneeEmail, replyTo: managerEmail, subject, text });
+      await logActivity({
+        actionType: 'Email notification sent',
+        moduleName: 'CALENDAR',
+        projectName,
+        description: `Assignment email sent to ${assigneeEmail} for "${projectName}".`,
+        newValue: { assigneeEmail, managerEmail, subject },
+        request: req,
+      });
       res.json({ success: true, emailSent: true, message: 'Assignment email sent' });
     } catch (error) {
       if (error instanceof EmailConfigurationError) {
+        await logActivity({
+          actionType: 'Email notification failed',
+          moduleName: 'CALENDAR',
+          projectName,
+          description: `Assignment email was not sent for "${projectName}" because SMTP is not configured.`,
+          metadata: { assigneeEmail, managerEmail, reason: error.message },
+          request: req,
+        });
         res.json({
           success: true,
           emailSent: false,

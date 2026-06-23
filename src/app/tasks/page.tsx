@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import ProjectFilesModal from '@/components/ProjectFilesModal';
 import { Eye, FolderTree, Search, SlidersHorizontal } from 'lucide-react';
+import { logClientActivity } from '@/utils/activityLog';
 import styles from './page.module.css';
 
 export default function TaskListPage() {
@@ -37,6 +38,14 @@ export default function TaskListPage() {
   const openProjectData = (projectId: string, projectName?: string) => {
     setProjectForModal({ id: projectId, name: projectName });
     setShowProjectFilesModal(true);
+    void logClientActivity({
+      actionType: 'File viewed',
+      moduleName: 'FILES',
+      projectId,
+      projectName,
+      description: `Project files viewed for "${projectName || projectId}".`,
+      metadata: { source: 'Project List data tree' },
+    });
   };
 
   const handleProjectContextMenu = async (event: React.MouseEvent<HTMLTableRowElement>, project: typeof projects[number]) => {

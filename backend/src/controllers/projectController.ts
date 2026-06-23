@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth.js';
 import prisma from '../config/prisma.js';
 import { scanAbsoluteFolder, ScannedFolder, ScannedFile } from '../services/fileSystemService.js';
 import { SERVER_CONFIG } from '../config/constants.js';
+import { logActivity } from '../services/activityLogService.js';
 
 const mapProject = (project: any) => ({
   ...project,
@@ -310,6 +311,16 @@ export const moveProjectToFinalSubmission = async (req: AuthRequest, res: Respon
       }
     });
 
+    await logActivity({
+      actionType: 'Project moved to final certification',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: project.name,
+      description: `Project "${project.name}" moved to final submission.`,
+      newValue: { checklistStage: project.checklistStage },
+      request: req,
+    });
+
     res.json({
       message: 'Project moved to final submission',
       data: {
@@ -329,6 +340,16 @@ export const moveProjectToReview = async (req: AuthRequest, res: Response): Prom
     const project = await prisma.project.update({
       where: { id },
       data: { checklistStage: 'REVIEW' },
+    });
+
+    await logActivity({
+      actionType: 'Project moved to review',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: project.name,
+      description: `Project "${project.name}" moved back to review.`,
+      newValue: { checklistStage: project.checklistStage },
+      request: req,
     });
 
     res.json({
@@ -514,7 +535,7 @@ export const createBlankPublicProject = async (req: AuthRequest, res: Response):
     });
 
     try {
-      await persistBlankProjectFolders(project.id, normalizedProjectRootPath);
+    await persistBlankProjectFolders(project.id, normalizedProjectRootPath);
     } catch (error) {
       await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
       throw error;
@@ -527,6 +548,21 @@ export const createBlankPublicProject = async (req: AuthRequest, res: Response):
         members: { include: { user: { select: { id: true, name: true } } } },
         _count: { select: { folders: true, files: true } },
       },
+    });
+
+    await logActivity({
+      actionType: 'New blank project created',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: cleanProjectName,
+      description: `Blank ${projectType} project "${cleanProjectName}" created.`,
+      newValue: {
+        projectType,
+        projectName: cleanProjectName,
+        rootPath: normalizedProjectRootPath,
+      },
+      metadata: { folderCount: createdProject?._count.folders ?? 0 },
+      request: req,
     });
 
     res.status(201).json({
@@ -556,6 +592,16 @@ export const deletePublicProject = async (req: AuthRequest, res: Response): Prom
       res.status(404).json({ error: 'Project not found' });
       return;
     }
+
+    await logActivity({
+      actionType: 'Project deleted',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: project.name,
+      description: `Project "${project.name}" deleted.`,
+      oldValue: project,
+      request: req,
+    });
 
     await deleteProjectFolderOnDisk(project.rootPath);
     await deleteProjectDatabaseRecords(project.id);

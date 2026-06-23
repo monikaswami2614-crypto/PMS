@@ -10,6 +10,7 @@ import {
   ListTodo,
   Calendar,
   Users,
+  History,
   ChevronLeft,
   ChevronRight,
   Sparkles,
@@ -51,6 +52,7 @@ export const Sidebar: React.FC = () => {
     { name: 'Certification Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
     { name: 'Calendar', path: '/calendar', icon: Calendar },
     { name: 'Team Members', path: '/team', icon: Users },
+    { name: 'Activity Logs', path: '/activity-logs', icon: History },
   ];
 
   const handleOpenProjectManagement = (sourceName: string, sourcePath: string) => {
