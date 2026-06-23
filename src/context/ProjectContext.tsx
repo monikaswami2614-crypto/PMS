@@ -58,6 +58,7 @@ interface ProjectContextType {
   setSelectedProject: (projectId: string) => void;
   sourceFilter: ProjectSourceFilter;
   setSourceFilter: (source: ProjectSourceFilter) => void;
+  refreshProjects: () => Promise<void>;
   addTask: (task: Omit<Task, 'id'>) => void;
   updateTask: (task: Task) => void;
   deleteTask: (taskId: string) => void;
@@ -197,31 +198,36 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [sourceFilter, setSourceFilter] = useState<ProjectSourceFilter>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const refreshProjects = async () => {
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
+    const res = await fetch(`${apiBase}/api/projects/public`);
+    if (!res.ok) {
+      throw new Error(`Failed to load projects from API (${res.status})`);
+    }
+
+    const json = await res.json();
+    const remoteProjects: Project[] = (json.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description || '',
+      category: p.category || '',
+      rootPath: p.rootPath || null,
+      status: p.status || '',
+      checklistStage: p.checklistStage || '',
+      folderCount: p.folderCount ?? 0,
+      fileCount: p.fileCount ?? 0,
+    }));
+
+    setProjectsState([{ id: 'all', name: 'All Projects', description: 'Overview of all active projects', category: 'All' }, ...remoteProjects]);
+  };
+
   // Hydrate state from LocalStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       // Fetch projects from backend public API and merge with the 'All Projects' sentinel
       (async () => {
         try {
-          const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
-          const res = await fetch(`${apiBase}/api/projects/public`);
-          if (res.ok) {
-            const json = await res.json();
-            const remoteProjects: Project[] = (json.data || []).map((p: any) => ({
-              id: p.id,
-              name: p.name,
-              description: p.description || '',
-              category: p.category || '',
-              rootPath: p.rootPath || null,
-              status: p.status || '',
-              checklistStage: p.checklistStage || '',
-              folderCount: p.folderCount ?? 0,
-              fileCount: p.fileCount ?? 0,
-            }));
-            setProjectsState([{ id: 'all', name: 'All Projects', description: 'Overview of all active projects', category: 'All' }, ...remoteProjects]);
-          } else {
-            console.warn('Failed to load projects from API:', res.status);
-          }
+          await refreshProjects();
         } catch (err) {
           console.warn('Error fetching projects:', err);
         }
@@ -344,6 +350,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setSelectedProject,
         sourceFilter,
         setSourceFilter,
+        refreshProjects,
         addTask,
         updateTask,
         deleteTask,

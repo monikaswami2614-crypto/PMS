@@ -4,8 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Bell, CheckCircle2, Clock3, Palette, Search, Plus, Settings, SlidersHorizontal, User, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
-import { TaskModal } from './TaskModal';
-import TaskFormModal from './TaskFormModal';
+import CreateNewProjectModal from './CreateNewProjectModal';
 import styles from './Header.module.css';
 
 type ThemePreference = 'dark' | 'light';
@@ -214,7 +213,7 @@ export const Header: React.FC = () => {
           onClick={() => setIsModalOpen(true)}
         >
           <Plus size={18} />
-          <span>{pathname === '/board' ? 'New Project' : 'New Task'}</span>
+          <span>New Project</span>
         </button>
 
         {/* Search Bar */}
@@ -420,14 +419,7 @@ export const Header: React.FC = () => {
         </div>
       )}
 
-      {/* Task Creation Modal */}
-      {isModalOpen && (
-        selectedProject === 'all' ? (
-          <TaskModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-        ) : (
-          <TaskFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-        )
-      )}
+      <CreateNewProjectModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
 
       {showPreferences && (
         <div className={styles.preferencesOverlay} role="dialog" aria-modal="true" aria-label="System preferences">

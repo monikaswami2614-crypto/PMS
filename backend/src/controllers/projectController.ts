@@ -1,13 +1,163 @@
 import path from 'path';
+import { promises as fs } from 'fs';
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import prisma from '../config/prisma.js';
 import { scanAbsoluteFolder, ScannedFolder, ScannedFile } from '../services/fileSystemService.js';
+import { SERVER_CONFIG } from '../config/constants.js';
 
 const mapProject = (project: any) => ({
   ...project,
   members: project.members.map((member: any) => member.user)
 });
+
+const certificationFolders = [
+  '0. General Submittal',
+  '1. Supporting',
+  '2. Sustainable Architecture and Design',
+  '3. Water Conservation',
+  '4. Energy Efficiency',
+  '5. Building Material and Resources',
+  '6. Indoor Environmental Quality',
+  '7. Innovation and Development',
+];
+
+const getProjectTypeRootName = (projectType: string): string => (
+  projectType === 'NB' ? 'NB Project' : 'Green Homes'
+);
+
+const sanitizeFolderName = (name: string): string => name.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '').replace(/\s+/g, ' ');
+
+const findOrCreateProjectTypeRoot = async (scanRootPath: string, projectType: string): Promise<string> => {
+  const preferredName = getProjectTypeRootName(projectType);
+  const candidates = projectType === 'NB'
+    ? ['NB Project', 'NB Projects', 'NB']
+    : ['Green Homes', 'green homes', 'GREEN HOMES', 'Green_Homes'];
+
+  await fs.mkdir(scanRootPath, { recursive: true });
+
+  for (const candidate of candidates) {
+    const candidatePath = path.join(scanRootPath, candidate);
+    try {
+      const stats = await fs.stat(candidatePath);
+      if (stats.isDirectory()) return candidatePath;
+    } catch {
+      // Try the next known root folder name.
+    }
+  }
+
+  const rootPath = path.join(scanRootPath, preferredName);
+  await fs.mkdir(rootPath, { recursive: true });
+  return rootPath;
+};
+
+const createCertificationStructureOnDisk = async (projectRootPath: string): Promise<string[]> => {
+  const foldersToCreate: string[] = [];
+
+  for (const phase of ['Pre Certification', 'Final Certification']) {
+    const submissionPath = path.join(projectRootPath, phase, '1 Submission');
+    foldersToCreate.push(path.join(projectRootPath, phase), submissionPath);
+
+    for (const folder of certificationFolders) {
+      foldersToCreate.push(path.join(submissionPath, folder));
+    }
+  }
+
+  for (const folderPath of foldersToCreate) {
+    await fs.mkdir(folderPath, { recursive: true });
+  }
+
+  return foldersToCreate;
+};
+
+const deleteProjectDatabaseRecords = async (projectId: string): Promise<void> => {
+  await prisma.validationLog.deleteMany({ where: { projectId } });
+  await prisma.projectChecklistStatus.deleteMany({ where: { projectId } });
+  await prisma.certificationValidationResult.deleteMany({ where: { projectId } });
+  await prisma.projectCertificationStatus.deleteMany({ where: { projectId } });
+  await prisma.file.deleteMany({ where: { projectId } });
+  await prisma.task.deleteMany({ where: { projectId } });
+  await prisma.projectMember.deleteMany({ where: { projectId } });
+
+  const folders = await prisma.folder.findMany({
+    where: { projectId },
+    select: { id: true, relativePath: true },
+  });
+
+  const foldersDeepestFirst = folders.sort((a, b) => {
+    const depthA = a.relativePath ? a.relativePath.split('/').length : 0;
+    const depthB = b.relativePath ? b.relativePath.split('/').length : 0;
+    return depthB - depthA;
+  });
+
+  for (const folder of foldersDeepestFirst) {
+    await prisma.folder.delete({ where: { id: folder.id } });
+  }
+
+  await prisma.project.delete({ where: { id: projectId } });
+};
+
+const deleteProjectFolderOnDisk = async (projectRootPath?: string | null): Promise<void> => {
+  if (!projectRootPath || !SERVER_CONFIG.scanRootPath) return;
+
+  const scanRootPath = path.resolve(SERVER_CONFIG.scanRootPath);
+  const resolvedProjectPath = path.resolve(projectRootPath);
+  const relativeProjectPath = path.relative(scanRootPath, resolvedProjectPath);
+
+  if (relativeProjectPath.startsWith('..') || path.isAbsolute(relativeProjectPath) || relativeProjectPath === '') {
+    throw new Error('Project path is outside the configured scan root');
+  }
+
+  await fs.rm(resolvedProjectPath, { recursive: true, force: true });
+};
+
+const persistBlankProjectFolders = async (projectId: string, projectRootPath: string): Promise<void> => {
+  const rootFolder = await prisma.folder.create({
+    data: {
+      name: path.basename(projectRootPath),
+      path: projectRootPath,
+      relativePath: '',
+      project: { connect: { id: projectId } },
+    },
+  });
+
+  for (const phase of ['Pre Certification', 'Final Certification']) {
+    const phasePath = path.join(projectRootPath, phase);
+    const phaseFolder = await prisma.folder.create({
+      data: {
+        name: phase,
+        path: phasePath,
+        relativePath: path.relative(projectRootPath, phasePath).split(path.sep).join('/'),
+        project: { connect: { id: projectId } },
+        parent: { connect: { id: rootFolder.id } },
+      },
+    });
+
+    const submissionPath = path.join(phasePath, '1 Submission');
+    const submissionFolder = await prisma.folder.create({
+      data: {
+        name: '1 Submission',
+        path: submissionPath,
+        relativePath: path.relative(projectRootPath, submissionPath).split(path.sep).join('/'),
+        project: { connect: { id: projectId } },
+        parent: { connect: { id: phaseFolder.id } },
+      },
+    });
+
+    for (const folder of certificationFolders) {
+      const folderPath = path.join(submissionPath, folder);
+      await prisma.folder.create({
+        data: {
+          name: folder,
+          path: folderPath,
+          relativePath: path.relative(projectRootPath, folderPath).split(path.sep).join('/'),
+          project: { connect: { id: projectId } },
+          parent: { connect: { id: submissionFolder.id } },
+        },
+      });
+    }
+  }
+};
 
 export const getAllProjects = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -293,6 +443,127 @@ export const importPublicProject = async (req: AuthRequest, res: Response): Prom
   } catch (error: any) {
     console.error('importPublicProject error', error);
     res.status(500).json({ error: 'Failed to import public project', details: error?.message });
+  }
+};
+
+export const createBlankPublicProject = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { projectType, projectName } = req.body as { projectType?: string; projectName?: string };
+
+    if (!projectType || !['NB', 'GH'].includes(projectType)) {
+      res.status(400).json({ error: 'Project Type must be NB or GH' });
+      return;
+    }
+
+    const cleanProjectName = sanitizeFolderName(projectName || '');
+    if (!cleanProjectName) {
+      res.status(400).json({ error: 'Project Name is required' });
+      return;
+    }
+
+    if (!SERVER_CONFIG.scanRootPath) {
+      res.status(500).json({ error: 'SCAN_ROOT_PATH is not configured in backend .env' });
+      return;
+    }
+
+    const scanRootPath = path.resolve(SERVER_CONFIG.scanRootPath);
+    const projectTypeRootPath = await findOrCreateProjectTypeRoot(scanRootPath, projectType);
+    const projectRootPath = path.join(projectTypeRootPath, cleanProjectName);
+    const normalizedProjectRootPath = path.resolve(projectRootPath);
+
+    const relativeProjectPath = path.relative(scanRootPath, normalizedProjectRootPath);
+    if (relativeProjectPath.startsWith('..') || path.isAbsolute(relativeProjectPath)) {
+      res.status(400).json({ error: 'Project path is outside the configured scan root' });
+      return;
+    }
+
+    const existingProjectFolder = await fs.stat(normalizedProjectRootPath).catch(() => null);
+    if (existingProjectFolder) {
+      res.status(409).json({ error: 'A project folder with this name already exists' });
+      return;
+    }
+
+    const existingProject = await prisma.project.findFirst({
+      where: {
+        OR: [
+          { name: cleanProjectName },
+          { rootPath: normalizedProjectRootPath },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (existingProject) {
+      res.status(409).json({ error: 'A project with this name or path already exists' });
+      return;
+    }
+
+    await fs.mkdir(normalizedProjectRootPath, { recursive: true });
+    await createCertificationStructureOnDisk(normalizedProjectRootPath);
+
+    const category = projectType === 'NB' ? 'NB Project' : 'Green Homes';
+    const project = await prisma.project.create({
+      data: {
+        name: cleanProjectName,
+        description: '',
+        category,
+        rootPath: normalizedProjectRootPath,
+        status: 'active',
+        startDate: new Date(),
+      },
+    });
+
+    try {
+      await persistBlankProjectFolders(project.id, normalizedProjectRootPath);
+    } catch (error) {
+      await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
+      throw error;
+    }
+
+    const createdProject = await prisma.project.findUnique({
+      where: { id: project.id },
+      include: {
+        owner: { select: { id: true, name: true } },
+        members: { include: { user: { select: { id: true, name: true } } } },
+        _count: { select: { folders: true, files: true } },
+      },
+    });
+
+    res.status(201).json({
+      message: 'Blank project created successfully',
+      data: createdProject ? {
+        ...mapProject(createdProject),
+        folderCount: createdProject._count.folders,
+        fileCount: createdProject._count.files,
+      } : { projectId: project.id },
+    });
+  } catch (error: any) {
+    console.error('createBlankPublicProject error', error);
+    res.status(500).json({ error: 'Failed to create blank project', details: error?.message });
+  }
+};
+
+export const deletePublicProject = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const project = await prisma.project.findUnique({
+      where: { id },
+      select: { id: true, name: true, rootPath: true },
+    });
+
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    await deleteProjectFolderOnDisk(project.rootPath);
+    await deleteProjectDatabaseRecords(project.id);
+
+    res.json({ message: 'Project deleted successfully', data: { projectId: project.id } });
+  } catch (error: any) {
+    console.error('deletePublicProject error', error);
+    res.status(500).json({ error: 'Failed to delete project', details: error?.message });
   }
 };
 

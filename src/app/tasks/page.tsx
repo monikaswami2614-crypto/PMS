@@ -8,7 +8,7 @@ import { Eye, FolderTree, Search, SlidersHorizontal } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function TaskListPage() {
-  const { selectedProject, projects, sourceFilter } = useProjects();
+  const { selectedProject, projects, sourceFilter, refreshProjects } = useProjects();
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [showProjectFilesModal, setShowProjectFilesModal] = useState(false);
@@ -37,6 +37,30 @@ export default function TaskListPage() {
   const openProjectData = (projectId: string, projectName?: string) => {
     setProjectForModal({ id: projectId, name: projectName });
     setShowProjectFilesModal(true);
+  };
+
+  const handleProjectContextMenu = async (event: React.MouseEvent<HTMLTableRowElement>, project: typeof projects[number]) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const shouldDelete = window.confirm(`Delete project "${project.name}"?\n\nThis will delete the project from the database and remove its project folder.`);
+    if (!shouldDelete) return;
+
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
+      const response = await fetch(`${apiBase}/api/projects/${project.id}/public`, {
+        method: 'DELETE',
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to delete project.');
+      }
+
+      await refreshProjects();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to delete project.');
+    }
   };
 
   const getSourceLabel = (project: typeof projects[number]) => {
@@ -98,6 +122,7 @@ export default function TaskListPage() {
                   <tr
                     key={project.id}
                     onClick={() => openProjectData(project.id, project.name)}
+                    onContextMenu={(event) => handleProjectContextMenu(event, project)}
                     className={styles.tableRow}
                   >
                     <td className={styles.tdTitle}>
