@@ -256,6 +256,79 @@
   gap: 8px;
 }
 
+.treeToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 40px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(var(--surface-rgb), 0.28);
+}
+
+.treeSelect {
+  min-width: 180px;
+  max-width: 280px;
+  background: rgba(var(--surface-rgb), 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  outline: none;
+  padding: 9px 36px 9px 12px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg fill='gray' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: var(--transition-fast);
+}
+
+.treeSelect:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.12);
+}
+
+.treeSelect option {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.treeSearchWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.treeSearchIcon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.treeSearchInput {
+  width: 100%;
+  background: rgba(var(--surface-rgb), 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  outline: none;
+  padding: 9px 12px 9px 38px;
+  transition: var(--transition-fast);
+}
+
+.treeSearchInput:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.12);
+}
+
 
 /* Modal Footer */
 .footer {
@@ -345,5 +418,15 @@
 
   .header {
     padding: 16px;
+  }
+
+  .treeToolbar {
+    padding: 14px 16px;
+  }
+
+  .treeSelect,
+  .treeSearchWrapper {
+    width: 100%;
+    max-width: none;
   }
 }

@@ -2,19 +2,15 @@
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getProjectSource, useProjects, Task } from '@/context/ProjectContext';
-import { TaskModal } from '@/components/TaskModal';
-import TaskFormModal from '@/components/TaskFormModal';
+import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import ProjectFilesModal from '@/components/ProjectFilesModal';
-import { Eye, FolderTree, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { Eye, FolderTree, Search, SlidersHorizontal } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function TaskListPage() {
   const { selectedProject, projects, sourceFilter } = useProjects();
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTask, setSelectedTask] = useState<Task | undefined>(undefined);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [showProjectFilesModal, setShowProjectFilesModal] = useState(false);
   const [projectForModal, setProjectForModal] = useState<{ id: string; name?: string } | null>(null);
 
@@ -41,11 +37,6 @@ export default function TaskListPage() {
   const openProjectData = (projectId: string, projectName?: string) => {
     setProjectForModal({ id: projectId, name: projectName });
     setShowProjectFilesModal(true);
-  };
-
-  const handleCreateClick = () => {
-    setSelectedTask(undefined);
-    setIsModalOpen(true);
   };
 
   const getSourceLabel = (project: typeof projects[number]) => {
@@ -85,10 +76,6 @@ export default function TaskListPage() {
           </div>
         </div>
 
-        <button className={styles.addTaskBtn} onClick={handleCreateClick}>
-          <Plus size={16} />
-          <span>Add Task</span>
-        </button>
       </div>
 
       <div className={`${styles.tableCard} glassmorphic`}>
@@ -154,14 +141,6 @@ export default function TaskListPage() {
           </div>
         )}
       </div>
-
-      {isModalOpen && (
-        selectedProject === 'all' ? (
-          <TaskModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-        ) : (
-          <TaskFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} task={selectedTask} />
-        )
-      )}
 
       {showProjectFilesModal && projectForModal && (
         <ProjectFilesModal
