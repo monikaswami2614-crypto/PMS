@@ -1,25 +1,61 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Bell, CheckCircle2, Clock3, History, Palette, Search, Plus, Settings, SlidersHorizontal, User, X } from 'lucide-react';
-import { getProjectSource, useProjects } from '@/context/ProjectContext';
+import { Bell, Clock3, FolderPlus, History, Mail, Palette, Search, Plus, Settings, SlidersHorizontal, User, UserCheck, X } from 'lucide-react';
+import { useProjects } from '@/context/ProjectContext';
 import CreateNewProjectModal from './CreateNewProjectModal';
 import styles from './Header.module.css';
 
 type ThemePreference = 'dark' | 'light';
 type SizePreference = 'compact' | 'default' | 'comfortable';
 
+interface SystemNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  createdAt: string;
+}
+
+const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
+const demoTaskIds = new Set(['t-1', 't-2', 't-3', 't-4', 't-5', 't-6']);
+
+const formatTimeAgo = (value: string) => {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (elapsedSeconds < 60) return 'Just now';
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays}d ago`;
+
+  return new Date(value).toLocaleDateString('en-GB');
+};
+
+const getNotificationIcon = (type: string) => {
+  if (type === 'PROJECT_ADDED') return <FolderPlus size={16} />;
+  if (type === 'PROJECT_ASSIGNED') return <UserCheck size={16} />;
+  if (type === 'EMAIL_SENT' || type === 'EMAIL_FAILED') return <Mail size={16} />;
+  return <Clock3 size={16} />;
+};
+
 export const Header: React.FC = () => {
   const pathname = usePathname();
-  const { selectedProject, projects, tasks, team, sourceFilter } = useProjects();
+  const { selectedProject, projects, tasks, team } = useProjects();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [notificationDismissed, setNotificationDismissed] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [userProfile, setUserProfile] = useState({
     name: 'Sarah Jenkins',
     email: 'sarah.j@kamalcogent.com',
@@ -40,47 +76,59 @@ export const Header: React.FC = () => {
 
   // Get active project details
   const activeProject = projects.find(p => p.id === selectedProject);
-  const sourceByProjectId = new Map(projects.map((project) => [project.id, getProjectSource(project)]));
-  const activeTasks = tasks.filter((task) => {
-    if (selectedProject !== 'all' && task.project !== selectedProject) return false;
-    if (sourceFilter && sourceByProjectId.get(task.project) !== sourceFilter) return false;
-    return true;
-  });
 
-  const notifications = useMemo(() => {
-    const dueSoon = activeTasks
-      .filter((task) => task.status !== 'done')
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-      .slice(0, 2);
-    const reviewCount = activeTasks.filter((task) => task.status === 'review').length;
-    const doneCount = activeTasks.filter((task) => task.status === 'done').length;
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBase}/api/notifications`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Failed to load notifications (${response.status})`);
+      const payload = await response.json();
+      const unreadNotifications = Array.isArray(payload.data) ? payload.data : [];
+      setNotifications(unreadNotifications);
+      setUnreadCount(Number(payload.unreadCount) || 0);
+    } catch (error) {
+      console.warn('Unable to load notifications:', error);
+      setNotifications([]);
+      setUnreadCount(0);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
 
-    const generated = [
-      ...dueSoon.map((task, index) => ({
-        id: `deadline-${task.id}`,
-        icon: <Clock3 size={16} />,
-        title: 'Project deadline',
-        message: `${task.title} is due on ${new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.`,
-        isNew: true,
-      })),
-      {
-        id: 'progress-summary',
-        icon: <SlidersHorizontal size={16} />,
-        title: 'Project progress',
-        message: `${reviewCount} project${reviewCount === 1 ? '' : 's'} waiting for review.`,
-        isNew: false,
-      },
-      {
-        id: 'completion-summary',
-        icon: <CheckCircle2 size={16} />,
-        title: 'Completion update',
-        message: `${doneCount} project${doneCount === 1 ? '' : 's'} completed successfully.`,
-        isNew: false,
-      },
-    ];
+  useEffect(() => {
+    let cancelled = false;
 
-    return generated.filter((item) => !notificationDismissed.includes(item.id));
-  }, [activeTasks, notificationDismissed]);
+    const syncNotifications = async () => {
+      try {
+        await fetch(`${apiBase}/api/notifications/calendar-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deadlines: tasks
+              .filter((task) => !demoTaskIds.has(task.id) && task.status !== 'done' && task.dueDate)
+              .map((task) => {
+                const assignee = team.find((member) => member.id === task.assigneeId);
+                return {
+                  id: task.id,
+                  projectName: task.title,
+                  dueDate: task.dueDate,
+                  assignedTo: assignee?.name || task.managerName || '',
+                  assigneeEmail: task.assigneeEmail || assignee?.email || '',
+                };
+              }),
+          }),
+        });
+      } catch (error) {
+        console.warn('Unable to sync calendar notifications:', error);
+      }
+
+      if (!cancelled) await loadNotifications();
+    };
+
+    void syncNotifications();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadNotifications, tasks, team]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -137,8 +185,22 @@ export const Header: React.FC = () => {
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  const handleNotificationDismiss = (notificationId: string) => {
-    setNotificationDismissed((current) => [...current, notificationId]);
+  const handleNotificationDismiss = async (notificationId: string) => {
+    const previousNotifications = notifications;
+    const previousCount = unreadCount;
+    setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
+    setUnreadCount((current) => Math.max(0, current - 1));
+
+    try {
+      const response = await fetch(`${apiBase}/api/notifications/${notificationId}/read`, {
+        method: 'PATCH',
+      });
+      if (!response.ok) throw new Error(`Failed to mark notification as read (${response.status})`);
+    } catch (error) {
+      console.warn('Unable to mark notification as read:', error);
+      setNotifications(previousNotifications);
+      setUnreadCount(previousCount);
+    }
   };
 
   const handleSignOut = () => {
@@ -238,10 +300,13 @@ export const Header: React.FC = () => {
           <button
             className={styles.iconBtn}
             aria-label="Notifications"
-            onClick={() => setShowNotifications((current) => !current)}
+            onClick={() => {
+              setShowNotifications((current) => !current);
+              void loadNotifications();
+            }}
           >
             <Bell size={20} />
-            <span className={styles.badge} />
+            {unreadCount > 0 && <span className={styles.badge} />}
           </button>
 
           {showNotifications && (
@@ -257,18 +322,23 @@ export const Header: React.FC = () => {
                   <X size={15} />
                 </button>
               </div>
-              {notifications.length === 0 ? (
-                <div className={styles.notificationEmpty}>All notifications cleared.</div>
+              {notificationsLoading ? (
+                <div className={styles.notificationEmpty}>Loading notifications...</div>
+              ) : notifications.length === 0 ? (
+                <div className={styles.notificationEmpty}>No new notifications</div>
               ) : (
                 notifications.map((item) => (
                   <div
-                    className={`${styles.notificationItem} ${item.isNew ? styles.notificationUnread : ''}`}
+                    className={`${styles.notificationItem} ${styles.notificationUnread}`}
                     key={item.id}
                   >
-                    <div className={styles.notificationIcon}>{item.icon}</div>
+                    <div className={styles.notificationIcon}>{getNotificationIcon(item.type)}</div>
                     <div className={styles.notificationContent}>
                       <strong>{item.title}</strong>
                       <p>{item.message}</p>
+                      <time className={styles.notificationTime} dateTime={item.createdAt}>
+                        {formatTimeAgo(item.createdAt)}
+                      </time>
                     </div>
                     <button
                       type="button"

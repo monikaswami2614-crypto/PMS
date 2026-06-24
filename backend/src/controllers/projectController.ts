@@ -6,6 +6,7 @@ import prisma from '../config/prisma.js';
 import { scanAbsoluteFolder, ScannedFolder, ScannedFile } from '../services/fileSystemService.js';
 import { SERVER_CONFIG } from '../config/constants.js';
 import { logActivity } from '../services/activityLogService.js';
+import { createProjectAddedNotification } from '../services/notificationService.js';
 
 const mapProject = (project: any) => ({
   ...project,
@@ -459,6 +460,7 @@ export const importPublicProject = async (req: AuthRequest, res: Response): Prom
     });
 
     await importFolderTree(tree, project.id, null);
+    await createProjectAddedNotification(project.id, project.name);
 
     res.status(201).json({ message: 'Public project imported', data: { projectId: project.id } });
   } catch (error: any) {
@@ -564,6 +566,7 @@ export const createBlankPublicProject = async (req: AuthRequest, res: Response):
       metadata: { folderCount: createdProject?._count.folders ?? 0 },
       request: req,
     });
+    await createProjectAddedNotification(project.id, cleanProjectName);
 
     res.status(201).json({
       message: 'Blank project created successfully',
@@ -665,6 +668,7 @@ export const createProject = async (req: AuthRequest, res: Response): Promise<vo
         }
       }
     });
+    await createProjectAddedNotification(project.id, project.name);
 
     res.status(201).json({
       message: 'Project created successfully',
@@ -863,6 +867,7 @@ export const importProject = async (req: AuthRequest, res: Response): Promise<vo
     };
 
     await persistFolder(tree, null);
+    await createProjectAddedNotification(project.id, project.name);
 
     res.status(201).json({ message: 'Project imported', data: { projectId: project.id } });
   } catch (error: any) {
