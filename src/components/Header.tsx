@@ -242,9 +242,13 @@ export const Header: React.FC = () => {
       case '/':
         return 'Dashboard Overview';
       case '/board':
-        return 'Projects Activity Board';
+        return 'Project Progress';
       case '/tasks':
-        return 'Project Management List';
+        return 'All Project List';
+      case '/checklist-review':
+        return 'Checklist Review';
+      case '/certification-filtration':
+        return 'Data Filtration';
       case '/calendar':
         return 'Project Calendar';
       case '/team':

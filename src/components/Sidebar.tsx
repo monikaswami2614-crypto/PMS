@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useProjects } from '@/context/ProjectContext';
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -13,7 +13,6 @@ import {
   History,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   ClipboardCheck,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -41,15 +40,14 @@ const checklistSources = [
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
-  const { projects } = useProjects();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const menuItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Projects Activity', path: '/board', icon: KanbanSquare },
-    { name: 'Project List', path: '/tasks', icon: ListTodo },
+    { name: 'Project Progress', path: '/board', icon: KanbanSquare },
+    { name: 'All Project List', path: '/tasks', icon: ListTodo },
     { name: 'Checklist Review', path: '/checklist-review', icon: ClipboardCheck },
-    { name: 'Certification Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
+    { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
     { name: 'Calendar', path: '/calendar', icon: Calendar },
     { name: 'Team Members', path: '/team', icon: Users },
     { name: 'Activity Logs', path: '/activity-logs', icon: History },
@@ -72,7 +70,13 @@ export const Sidebar: React.FC = () => {
       {/* Brand Header */}
       <div className={styles.brand}>
         <div className={styles.logoContainer}>
-          <Sparkles className={styles.logoIcon} />
+          <Image
+            src="/kamal-cogent-lotus.png"
+            alt="Kamal Cogent lotus"
+            width={40}
+            height={40}
+            className={styles.logoImage}
+          />
         </div>
         {!isCollapsed && (
           <span className={`${styles.brandName} gradient-text`}>Kamal Cogent PMS</span>

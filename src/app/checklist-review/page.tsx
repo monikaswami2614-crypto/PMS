@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
+import { logClientActivity } from '@/utils/activityLog';
 import styles from './page.module.css';
 
 type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
@@ -208,12 +209,31 @@ export default function ChecklistReviewPage() {
   const finalRequirements = review?.items.flatMap((item) => item.finalRequirements) ?? [];
   const completedPre = preRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
   const completedFinal = finalRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
+  const logChecklistActivity = (
+    actionType: string,
+    description: string,
+    details?: { oldValue?: unknown; newValue?: unknown; metadata?: unknown },
+  ) => {
+    void logClientActivity({
+      actionType,
+      moduleName: 'CHECKLIST_REVIEW',
+      projectId: review?.project.id || effectiveSelectedProjectId || null,
+      projectName: review?.project.name || selectedProject?.name || null,
+      description,
+      oldValue: details?.oldValue,
+      newValue: details?.newValue,
+      metadata: details?.metadata,
+    });
+  };
 
   const updateRequirementStatus = async (requirementId: string, phase: 'pre' | 'final', status: RequirementStatus) => {
     if (!review) return;
 
     const previousReview = review;
     const collectionKey = phase === 'pre' ? 'preRequirements' : 'finalRequirements';
+    const previousRequirement = review.items
+      .flatMap((item) => item[collectionKey])
+      .find((requirement) => requirement.id === requirementId);
     setSavingKey(`${requirementId}-${phase}`);
     setReview({
       ...review,
@@ -236,6 +256,15 @@ export default function ChecklistReviewPage() {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || 'Failed to save checklist status');
       }
+      logChecklistActivity(
+        'Checklist status updated',
+        `${phase === 'pre' ? 'Pre' : 'Final'} certification requirement status changed from ${previousRequirement?.status || 'unknown'} to ${status}.`,
+        {
+          oldValue: { requirementId, phase, status: previousRequirement?.status },
+          newValue: { requirementId, phase, status },
+          metadata: { requirementText: previousRequirement?.text || '' },
+        },
+      );
     } catch (err) {
       setReview(previousReview);
       setError(err instanceof Error ? err.message : 'Failed to save checklist status');
@@ -359,6 +388,14 @@ export default function ChecklistReviewPage() {
       };
     });
     clearSelection('filtration');
+    logChecklistActivity(
+      'Checklist files moved',
+      `${files.length} file${files.length === 1 ? '' : 's'} moved to Supporting Document.`,
+      {
+        newValue: files.map((file) => ({ id: file.id, name: getDisplayName(file) })),
+        metadata: { phase: filtrationPhase, destination: 'supporting' },
+      },
+    );
   };
 
   const moveFileToSupporting = (file: SheetFile) => {
@@ -380,6 +417,14 @@ export default function ChecklistReviewPage() {
       return next;
     });
     setFileContextMenu(null);
+    logChecklistActivity(
+      'Checklist file moved',
+      `"${getDisplayName(file)}" moved to Supporting Document.`,
+      {
+        newValue: { fileId: file.id, fileName: getDisplayName(file), destination: 'supporting' },
+        metadata: { phase: filtrationPhase },
+      },
+    );
   };
 
   const moveSelectedToFinal = () => {
@@ -403,6 +448,14 @@ export default function ChecklistReviewPage() {
       [filtrationPhase]: current[filtrationPhase].filter((file) => !selectedKeys.has(file.clientId)),
     }));
     clearSelection('supporting');
+    logChecklistActivity(
+      'Checklist files moved',
+      `${files.length} file${files.length === 1 ? '' : 's'} moved to IGBC submission.`,
+      {
+        newValue: files.map((file) => ({ id: file.id, name: getDisplayName(file) })),
+        metadata: { phase: filtrationPhase, destination: 'final' },
+      },
+    );
   };
 
   const moveFileToFinal = (file: SheetFile) => {
@@ -423,10 +476,19 @@ export default function ChecklistReviewPage() {
     }));
     setSelectedFiles((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.endsWith(file.clientId))));
     setFileContextMenu(null);
+    logChecklistActivity(
+      'Checklist file moved',
+      `"${getDisplayName(file)}" moved to IGBC submission.`,
+      {
+        newValue: { fileId: file.id, fileName: getDisplayName(file), destination: 'final' },
+        metadata: { phase: filtrationPhase },
+      },
+    );
   };
 
   const updateFileDisplayName = (file: SheetFile) => {
-    const nextName = window.prompt('Edit file name', getDisplayName(file));
+    const previousName = getDisplayName(file);
+    const nextName = window.prompt('Edit file name', previousName);
     const trimmedName = nextName?.trim();
     if (!trimmedName) return;
 
@@ -440,6 +502,15 @@ export default function ChecklistReviewPage() {
       final: current.final.map((item) => (item.clientId === file.clientId ? { ...item, displayName: trimmedName } : item)),
     }));
     setFileContextMenu(null);
+    logChecklistActivity(
+      'Checklist file renamed',
+      `Checklist file renamed from "${previousName}" to "${trimmedName}".`,
+      {
+        oldValue: { fileId: file.id, displayName: previousName },
+        newValue: { fileId: file.id, displayName: trimmedName },
+        metadata: { phase: filtrationPhase },
+      },
+    );
   };
 
   const removeFileToPreviousStep = (file: SheetFile, scope: FileActionScope) => {
@@ -476,6 +547,15 @@ export default function ChecklistReviewPage() {
 
     setSelectedFiles((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.endsWith(file.clientId))));
     setFileContextMenu(null);
+    logChecklistActivity(
+      'Checklist file removed',
+      `"${getDisplayName(file)}" removed from ${scope === 'final' ? 'IGBC submission' : 'Supporting Document'} and returned to the previous step.`,
+      {
+        oldValue: { fileId: file.id, fileName: getDisplayName(file), scope },
+        newValue: { destination: scope === 'final' ? 'supporting' : 'filtration' },
+        metadata: { phase: filtrationPhase },
+      },
+    );
   };
 
   const openFileEditor = (fileId: string, target: '_blank' | '_self') => {
@@ -514,6 +594,14 @@ export default function ChecklistReviewPage() {
       })),
     };
     console.log('IGBC Pre Submission payload', payload);
+    logChecklistActivity(
+      'Checklist final sheet saved',
+      `${filtrationPhase === 'pre' ? 'Pre' : 'Final'} certification sheet saved with ${files.length} file${files.length === 1 ? '' : 's'}.`,
+      {
+        newValue: payload,
+        metadata: { phase: filtrationPhase, creditName: currentGroup?.creditName || '' },
+      },
+    );
   };
 
   const renderStatusSelect = (requirement: RequirementPoint, phase: 'pre' | 'final') => {

@@ -545,6 +545,16 @@ export default function CalendarPage() {
           ? `No rows with a valid Date and Project Name were found.${skippedMessage}`
           : `Google Sheet synced: ${createdCount} created, ${updatedCount} updated.${skippedMessage}`,
       );
+      void logClientActivity({
+        actionType: 'Google Sheet calendar synced',
+        moduleName: 'CALENDAR',
+        description: `Google Sheet calendar sync completed: ${createdCount} deadline${createdCount === 1 ? '' : 's'} created, ${updatedCount} updated, and ${skippedRows} skipped.`,
+        newValue: { createdCount, updatedCount, skippedRows, validRows: incomingRows.size },
+        metadata: {
+          source: 'Google Sheet',
+          sheetId: '1uBQeUD1j3Jb6HXLrD87Y7vZ26ghjPS6DWHWYb5PKs6k',
+        },
+      });
     } catch (error) {
       setSheetSyncError(error instanceof Error ? error.message : 'Google Sheet sync failed.');
     } finally {

@@ -37,28 +37,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--border-radius-sm);
-  background: var(--sidebar-project-active-bg);
-  box-shadow: var(--glow-shadow);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
-.logoIcon {
-  color: #ffffff;
-  animation: logoPulse 3s infinite ease-in-out;
-}
-
-@keyframes logoPulse {
-  0%, 100% {
-    transform: scale(1);
-    filter: drop-shadow(0 0 2px rgba(255,255,255,0.5));
-  }
-  50% {
-    transform: scale(1.1);
-    filter: drop-shadow(0 0 8px rgba(255,255,255,0.9));
-  }
+.logoImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(244, 143, 177, 0.35));
 }
 
 .brandName {
