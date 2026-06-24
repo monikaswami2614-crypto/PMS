@@ -68,6 +68,65 @@
   gap: 12px;
 }
 
+.syncSheetBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  border-radius: var(--border-radius-sm);
+  padding: 0 14px;
+  color: #ffffff;
+  background: var(--accent-gradient);
+  box-shadow: var(--glow-shadow);
+  font-size: 0.8rem;
+  font-weight: 800;
+  transition: var(--transition-fast);
+}
+
+.syncSheetBtn:hover {
+  transform: translateY(-1px);
+  background: var(--accent-gradient-hover);
+}
+
+.syncSheetBtn:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.syncSuccess,
+.syncError {
+  margin-top: -8px;
+  border: 1px solid;
+  border-radius: var(--border-radius-sm);
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.syncSuccess {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+  color: #4ade80;
+}
+
+.syncError {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+}
+
 .todayBtn {
   background: rgba(var(--contrast-surface-rgb), 0.03);
   border: 1px solid var(--border-color);
@@ -585,6 +644,14 @@
   .dateSelectors,
   .controls {
     width: 100%;
+  }
+
+  .controls {
+    flex-wrap: wrap;
+  }
+
+  .syncSheetBtn {
+    flex: 1;
   }
 
   .monthSelect,

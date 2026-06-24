@@ -2,11 +2,31 @@
 
 import React, { useMemo, useState } from 'react';
 import { DeadlineProjectType, getProjectSource, Project, useProjects, Task, TaskPriority, TaskStatus } from '@/context/ProjectContext';
-import { CalendarDays, ChevronLeft, ChevronRight, Layers, Mail, Plus, Tag, Trash2, User, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Layers, Mail, Plus, RefreshCw, Tag, Trash2, User, X } from 'lucide-react';
 import { logClientActivity } from '@/utils/activityLog';
 import styles from './page.module.css';
 
 type DeadlineStatus = TaskStatus;
+type SyncedCalendarTask = Task & {
+  sheetSyncKey?: string;
+  sheetProjectType?: string;
+  sheetAssignedTo?: string;
+  sheetDeadline?: string;
+};
+
+type SheetDeadlineRow = {
+  date: string;
+  projectType: string;
+  projectName: string;
+  assignedTo: string;
+  assigneeEmail: string;
+  status: TaskStatus;
+  note: string;
+  deadline: string;
+  syncKey: string;
+};
+
+const GOOGLE_SHEET_SYNC_URL = '/api/google-sheet-calendar';
 
 const statusLabels: Record<DeadlineStatus, string> = {
   todo: 'New',
@@ -24,9 +44,106 @@ const priorityLabels: Record<TaskPriority, string> = {
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const formatDateOnly = (date: Date) => (
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+);
+
+const formatDisplayDate = (value: string) => {
+  const date = parseDateOnly(value);
+  return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+};
+
 const parseDateOnly = (value: string) => {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, month - 1, day);
+};
+
+const parseSheetDate = (value: string): string | null => {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return null;
+
+  const isoMatch = trimmedValue.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const localMatch = trimmedValue.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+
+  let year: number;
+  let month: number;
+  let day: number;
+
+  if (isoMatch) {
+    [, year, month, day] = isoMatch.map(Number);
+  } else if (localMatch) {
+    [, day, month, year] = localMatch.map(Number);
+  } else {
+    const parsedDate = new Date(trimmedValue);
+    if (Number.isNaN(parsedDate.getTime())) return null;
+    return formatDateOnly(parsedDate);
+  }
+
+  const parsedDate = new Date(year, month - 1, day);
+  if (
+    parsedDate.getFullYear() !== year
+    || parsedDate.getMonth() !== month - 1
+    || parsedDate.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return formatDateOnly(parsedDate);
+};
+
+const parseCsv = (csv: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let insideQuotes = false;
+
+  for (let index = 0; index < csv.length; index += 1) {
+    const character = csv[index];
+
+    if (character === '"') {
+      if (insideQuotes && csv[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        insideQuotes = !insideQuotes;
+      }
+    } else if (character === ',' && !insideQuotes) {
+      row.push(field);
+      field = '';
+    } else if ((character === '\n' || character === '\r') && !insideQuotes) {
+      if (character === '\r' && csv[index + 1] === '\n') index += 1;
+      row.push(field);
+      if (row.some((cell) => cell.trim())) rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+
+  row.push(field);
+  if (row.some((cell) => cell.trim())) rows.push(row);
+  return rows;
+};
+
+const normalizeValue = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+const createSheetSyncKey = (date: string, projectType: string, projectName: string, assigneeEmail: string) => (
+  [date, projectType, projectName, assigneeEmail].map(normalizeValue).join('|')
+);
+
+const mapSheetStatus = (value: string): TaskStatus => {
+  const normalizedStatus = normalizeValue(value).replace(/[-\s]+/g, '_');
+
+  if (['done', 'completed', 'complete', 'closed'].includes(normalizedStatus)) return 'done';
+  if (['in_progress', 'progress', 'active', 'ongoing'].includes(normalizedStatus)) return 'in_progress';
+  if (['review', 'in_review', 'pending_review'].includes(normalizedStatus)) return 'review';
+  return 'todo';
+};
+
+const mapSheetProjectType = (value: string): DeadlineProjectType => {
+  const normalizedType = normalizeValue(value);
+  return normalizedType === 'gh' || normalizedType.includes('green home') ? 'GH' : 'NB';
 };
 
 const calculatePriority = (deadline: string): TaskPriority => {
@@ -67,6 +184,9 @@ export default function CalendarPage() {
   const [assigneeEmail, setAssigneeEmail] = useState('');
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncMessage, setSheetSyncMessage] = useState('');
+  const [sheetSyncError, setSheetSyncError] = useState('');
 
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
@@ -90,7 +210,13 @@ export default function CalendarPage() {
   const calculatedPriority = calculatePriority(deadline);
   const filteredTasks = tasks.filter((task) => {
     if (selectedProject !== 'all' && task.project !== selectedProject) return false;
-    if (sourceFilter && sourceByProjectId.get(task.project) !== sourceFilter) return false;
+    const syncedTask = task as SyncedCalendarTask;
+    const taskSource = sourceByProjectId.get(task.project) || (
+      syncedTask.sheetSyncKey
+        ? (mapSheetProjectType(syncedTask.sheetProjectType || task.projectType || '') === 'GH' ? 'GREEN_HOMES' : 'NB')
+        : null
+    );
+    if (sourceFilter && taskSource !== sourceFilter) return false;
     return true;
   });
 
@@ -302,6 +428,130 @@ export default function CalendarPage() {
     }
   };
 
+  const handleGoogleSheetSync = async () => {
+    setIsSyncingSheet(true);
+    setSheetSyncMessage('');
+    setSheetSyncError('');
+
+    try {
+      const response = await fetch(`${GOOGLE_SHEET_SYNC_URL}?cacheBust=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Google Sheet could not be loaded (${response.status}).`);
+      }
+
+      const rows = parseCsv(await response.text());
+      const headers = (rows[0] || []).map((header) => normalizeValue(header));
+      const requiredHeaders = ['date', 'project type', 'project name', 'assigned to', 'assignee email', 'status', 'note'];
+      const headerIndexes = Object.fromEntries(requiredHeaders.map((header) => [header, headers.indexOf(header)]));
+      const missingHeaders = requiredHeaders.filter((header) => headerIndexes[header] === -1);
+      const deadlineHeaderIndex = headers.findIndex((header) => header === 'deadline' || header === 'deadline date');
+
+      if (deadlineHeaderIndex === -1) missingHeaders.push('deadline');
+
+      if (missingHeaders.length > 0) {
+        throw new Error(`Missing Google Sheet columns: ${missingHeaders.join(', ')}.`);
+      }
+
+      const incomingRows = new Map<string, SheetDeadlineRow>();
+      let skippedRows = 0;
+
+      rows.slice(1).forEach((row) => {
+        const date = parseSheetDate(row[headerIndexes.date] || '');
+        const projectName = (row[headerIndexes['project name']] || '').trim();
+
+        if (!date || !projectName) {
+          skippedRows += 1;
+          return;
+        }
+
+        const projectType = (row[headerIndexes['project type']] || '').trim();
+        const assigneeEmail = (row[headerIndexes['assignee email']] || '').trim();
+        const syncKey = createSheetSyncKey(date, projectType, projectName, assigneeEmail);
+
+        incomingRows.set(syncKey, {
+          date,
+          projectType,
+          projectName,
+          assignedTo: (row[headerIndexes['assigned to']] || '').trim(),
+          assigneeEmail,
+          status: mapSheetStatus(row[headerIndexes.status] || ''),
+          note: (row[headerIndexes.note] || '').trim(),
+          deadline: parseSheetDate(row[deadlineHeaderIndex] || '') || '',
+          syncKey,
+        });
+      });
+
+      const existingByKey = new Map<string, SyncedCalendarTask>();
+      (tasks as SyncedCalendarTask[]).forEach((task) => {
+        const taskProjectType = task.sheetProjectType || task.projectType || '';
+        const taskKey = task.sheetSyncKey || (
+          task.assigneeEmail
+            ? createSheetSyncKey(task.dueDate, taskProjectType, task.title, task.assigneeEmail)
+            : ''
+        );
+        if (taskKey) existingByKey.set(taskKey, task);
+      });
+
+      let createdCount = 0;
+      let updatedCount = 0;
+
+      for (const sheetRow of incomingRows.values()) {
+        const matchedProject = selectableProjects.find(
+          (project) => normalizeValue(project.name) === normalizeValue(sheetRow.projectName),
+        );
+        const matchedAssignee = team.find(
+          (member) => (
+            sheetRow.assigneeEmail
+              ? normalizeValue(member.email) === normalizeValue(sheetRow.assigneeEmail)
+              : normalizeValue(member.name) === normalizeValue(sheetRow.assignedTo)
+          ),
+        );
+        const existingTask = existingByKey.get(sheetRow.syncKey);
+        const projectTypeValue = mapSheetProjectType(sheetRow.projectType);
+        const syncedTask = {
+          title: sheetRow.projectName,
+          description: sheetRow.note,
+          status: sheetRow.status,
+          priority: calculatePriority(sheetRow.date),
+          dueDate: sheetRow.date,
+          assigneeId: matchedAssignee?.id || '',
+          assigneeEmail: sheetRow.assigneeEmail,
+          managerName: sheetRow.assignedTo,
+          projectType: projectTypeValue,
+          project: matchedProject?.id || `google-sheet:${normalizeValue(sheetRow.projectName)}`,
+          subtasks: existingTask?.subtasks || [],
+          sheetSyncKey: sheetRow.syncKey,
+          sheetProjectType: sheetRow.projectType,
+          sheetAssignedTo: sheetRow.assignedTo,
+          sheetDeadline: sheetRow.deadline,
+        };
+
+        if (existingTask) {
+          updateTask({ ...existingTask, ...syncedTask });
+          updatedCount += 1;
+        } else {
+          addTask(syncedTask);
+          createdCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+      }
+
+      const firstImportedRow = incomingRows.values().next().value as SheetDeadlineRow | undefined;
+      if (firstImportedRow) setCurrentDate(parseDateOnly(firstImportedRow.date));
+
+      const skippedMessage = skippedRows > 0 ? ` ${skippedRows} invalid row${skippedRows === 1 ? '' : 's'} skipped.` : '';
+      setSheetSyncMessage(
+        incomingRows.size === 0
+          ? `No rows with a valid Date and Project Name were found.${skippedMessage}`
+          : `Google Sheet synced: ${createdCount} created, ${updatedCount} updated.${skippedMessage}`,
+      );
+    } catch (error) {
+      setSheetSyncError(error instanceof Error ? error.message : 'Google Sheet sync failed.');
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
   const isToday = (dateStr: string) => {
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -338,6 +588,14 @@ export default function CalendarPage() {
           </select>
         </div>
         <div className={styles.controls}>
+          <button
+            className={styles.syncSheetBtn}
+            onClick={handleGoogleSheetSync}
+            disabled={isSyncingSheet}
+          >
+            <RefreshCw size={15} className={isSyncingSheet ? styles.spinning : ''} />
+            {isSyncingSheet ? 'Syncing...' : 'Sync Google Sheet'}
+          </button>
           <button className={styles.todayBtn} onClick={handleToday}>
             Today
           </button>
@@ -351,6 +609,12 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
+
+      {(sheetSyncMessage || sheetSyncError) && (
+        <div className={sheetSyncError ? styles.syncError : styles.syncSuccess} role="status">
+          {sheetSyncError || sheetSyncMessage}
+        </div>
+      )}
 
       {/* Weekday Labels */}
       <div className={styles.weeksGrid}>
@@ -394,6 +658,8 @@ export default function CalendarPage() {
                 {cellTasks.slice(0, 3).map((task) => (
                   (() => {
                     const assignee = team.find((member) => member.id === task.assigneeId);
+                    const syncedTask = task as SyncedCalendarTask;
+                    const assigneeName = assignee?.name || syncedTask.sheetAssignedTo || task.managerName || 'Unassigned';
                     const taskPriority = task.status === 'done' ? 'done' : task.priority;
 
                     return (
@@ -401,12 +667,12 @@ export default function CalendarPage() {
                         key={task.id}
                         className={`${styles.taskStrip} ${styles[taskPriority]}`}
                         onClick={(e) => handleTaskClick(e, task)}
-                        title={`${task.title} - ${statusLabels[task.status]} - ${priorityLabels[task.priority]} - ${assignee?.name || 'Unassigned'}`}
+                        title={`${task.title} - ${statusLabels[task.status]} - ${priorityLabels[task.priority]} - ${assigneeName}`}
                       >
                         <span className={styles.priorityDot} />
                         <span className={styles.taskTitle}>{task.title}</span>
                         <span className={styles.taskMeta}>
-                          {statusLabels[task.status]} · {priorityLabels[task.priority]} · {assignee?.name || 'Unassigned'}
+                          {statusLabels[task.status]} · {priorityLabels[task.priority]} · {assigneeName}
                         </span>
                       </button>
                     );
@@ -459,6 +725,7 @@ export default function CalendarPage() {
                   <span><CalendarDays size={14} />Deadline</span>
                   <input
                     type="date"
+                    lang="en-GB"
                     value={deadline}
                     onChange={(event) => setDeadline(event.target.value)}
                     required
@@ -543,7 +810,7 @@ export default function CalendarPage() {
               <div className={styles.detailsGrid}>
                 <div className={styles.detailItem}>
                   <span><Layers size={14} />Project Type</span>
-                  <strong>{selectedTask.projectType || getProjectTypeFromProject(selectableProjects.find((project) => project.id === selectedTask.project)) || '-'}</strong>
+                  <strong>{(selectedTask as SyncedCalendarTask).sheetProjectType || selectedTask.projectType || getProjectTypeFromProject(selectableProjects.find((project) => project.id === selectedTask.project)) || '-'}</strong>
                 </div>
 
                 <div className={styles.detailItem}>
@@ -552,13 +819,23 @@ export default function CalendarPage() {
                 </div>
 
                 <div className={styles.detailItem}>
-                  <span><CalendarDays size={14} />Deadline</span>
-                  <strong>{selectedTask.dueDate}</strong>
+                  <span>
+                    <CalendarDays size={14} />
+                    {(selectedTask as SyncedCalendarTask).sheetSyncKey ? 'Event Date' : 'Deadline'}
+                  </span>
+                  <strong>{formatDisplayDate(selectedTask.dueDate)}</strong>
                 </div>
+
+                {(selectedTask as SyncedCalendarTask).sheetDeadline && (
+                  <div className={styles.detailItem}>
+                    <span><CalendarDays size={14} />Project Deadline</span>
+                    <strong>{formatDisplayDate((selectedTask as SyncedCalendarTask).sheetDeadline || '')}</strong>
+                  </div>
+                )}
 
                 <div className={styles.detailItem}>
                   <span><User size={14} />Assigned Person</span>
-                  <strong>{team.find((member) => member.id === selectedTask.assigneeId)?.name || 'Unassigned'}</strong>
+                  <strong>{team.find((member) => member.id === selectedTask.assigneeId)?.name || (selectedTask as SyncedCalendarTask).sheetAssignedTo || selectedTask.managerName || 'Unassigned'}</strong>
                 </div>
 
                 <div className={styles.detailItem}>
