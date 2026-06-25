@@ -29,6 +29,10 @@ type ReviewItem = {
   id: string;
   creditName: string;
   subCreditName: string;
+  points: {
+    availablePoints: number | null;
+    isRequired: boolean;
+  } | null;
   preRequirements: RequirementPoint[];
   finalRequirements: RequirementPoint[];
 };
@@ -141,6 +145,26 @@ const mainCreditNames: Record<string, string> = {
   IN: 'Innovation and Decarbonisation in Buildings',
 };
 
+const getTargetedPoints = (
+  preRequirements: RequirementPoint[],
+  finalRequirements: RequirementPoint[],
+  availablePoints: number,
+) => {
+  const fulfilledRequirements = [...preRequirements, ...finalRequirements].filter(
+    (requirement) => requirement.status === 'checked' || requirement.status === 'overridden'
+  ).length;
+
+  return Math.min(availablePoints, fulfilledRequirements);
+};
+
+const getCertificationRating = (targetedPoints: number) => {
+  if (targetedPoints >= 75) return 'Platinum';
+  if (targetedPoints >= 60) return 'Gold';
+  if (targetedPoints >= 50) return 'Silver';
+  if (targetedPoints >= 40) return 'Certified';
+  return 'Not Certified';
+};
+
 export default function ChecklistReviewPage() {
   const { projects } = useProjects();
   const reviewProjects = useMemo(() => projects.filter((project) => project.id !== 'all'), [projects]);
@@ -210,6 +234,47 @@ export default function ChecklistReviewPage() {
   const finalRequirements = review?.items.flatMap((item) => item.finalRequirements) ?? [];
   const completedPre = preRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
   const completedFinal = finalRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
+  const pointTotals = useMemo(() => {
+    const credits = new Map<string, {
+      availablePoints: number;
+      preRequirements: RequirementPoint[];
+      finalRequirements: RequirementPoint[];
+    }>();
+
+    for (const item of review?.items ?? []) {
+      const availablePoints = item.points?.isRequired ? null : item.points?.availablePoints;
+      if (availablePoints === null || availablePoints === undefined) continue;
+
+      const creditCode = item.creditName.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const existingCredit = credits.get(creditCode);
+      if (existingCredit) {
+        existingCredit.preRequirements.push(...item.preRequirements);
+        existingCredit.finalRequirements.push(...item.finalRequirements);
+      } else {
+        credits.set(creditCode, {
+          availablePoints,
+          preRequirements: [...item.preRequirements],
+          finalRequirements: [...item.finalRequirements],
+        });
+      }
+    }
+
+    return Array.from(credits.values()).reduce((totals, credit) => {
+      const targetedPoints = getTargetedPoints(
+        credit.preRequirements,
+        credit.finalRequirements,
+        credit.availablePoints,
+      );
+      totals.available += credit.availablePoints;
+      totals.targeted += targetedPoints;
+      totals.notTargeted += credit.availablePoints - targetedPoints;
+      return totals;
+    }, {
+      available: 0,
+      targeted: 0,
+      notTargeted: 0,
+    });
+  }, [review]);
   const logChecklistActivity = (
     actionType: string,
     description: string,
@@ -649,6 +714,47 @@ export default function ChecklistReviewPage() {
     );
   };
 
+  const renderPointsSummary = (item: ReviewItem) => {
+    if (!item.points) return null;
+
+    if (item.points.isRequired) {
+      return <div className={styles.requiredCredit}>Required Credit</div>;
+    }
+
+    const availablePoints = item.points.availablePoints;
+    if (availablePoints === null) return null;
+
+    const targetedPoints = getTargetedPoints(
+      item.preRequirements,
+      item.finalRequirements,
+      availablePoints,
+    );
+    const notTargetedPoints = availablePoints - targetedPoints;
+
+    return (
+      <div className={styles.pointsSummary}>
+        <span className={styles.availablePointsHighlight}>Available Points: {availablePoints}</span>
+        <span className={styles.targetedPointsHighlight}>Targeted: {targetedPoints}/{availablePoints}</span>
+        <span className={styles.notTargetedPointsHighlight}>Not Targeted: {notTargetedPoints}</span>
+      </div>
+    );
+  };
+
+  const renderHighlightedPointValues = (text: string) => {
+    const pointValuePattern = /\b\d+(?:\s*(?:&|and|to|-)\s*\d+)*\s*points?\b/gi;
+    const parts = text.split(pointValuePattern);
+    const matches = text.match(pointValuePattern) ?? [];
+
+    return parts.flatMap((part, index) => [
+      part,
+      matches[index] ? (
+        <span key={`${matches[index]}-${index}`} className={styles.pointValueHighlight}>
+          {matches[index]}
+        </span>
+      ) : null,
+    ]);
+  };
+
   const renderFileRow = (file: SheetFile, scope: FileActionScope) => {
     const selectionKey = filtrationPhase && currentCreditGroup ? `${filtrationPhase}-${currentCreditGroup.id}-${scope}-${file.clientId}` : file.clientId;
     const isSelectable = scope !== 'final';
@@ -750,6 +856,10 @@ export default function ChecklistReviewPage() {
         </div>
 
         <div className={styles.summaryGroup}>
+          <span className={styles.summaryPill}>Available Points: {pointTotals.available}</span>
+          <span className={styles.summaryPill}>Targeted Points: {pointTotals.targeted}/{pointTotals.available}</span>
+          <span className={styles.summaryPill}>Not Targeted Points: {pointTotals.notTargeted}</span>
+          <span className={styles.summaryPill}>Rating: {getCertificationRating(pointTotals.targeted)}</span>
           <ClientMailButton
             projectId={effectiveSelectedProjectId}
             projectName={review?.project.name || selectedProject?.name}
@@ -784,8 +894,13 @@ export default function ChecklistReviewPage() {
               <tbody>
                 {review.items.map((item) => (
                   <tr key={item.id}>
-                    <td className={styles.creditCell}>{item.creditName || '-'}</td>
-                    <td>{item.subCreditName || '-'}</td>
+                    <td className={styles.creditCell}>
+                      <div>{item.creditName || '-'}</div>
+                      {renderPointsSummary(item)}
+                    </td>
+                    <td>
+                      <div>{item.subCreditName ? renderHighlightedPointValues(item.subCreditName) : '-'}</div>
+                    </td>
                     <td>{renderRequirements(item.preRequirements, 'pre')}</td>
                     <td>{renderRequirements(item.finalRequirements, 'final')}</td>
                   </tr>

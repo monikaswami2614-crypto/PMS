@@ -34,8 +34,14 @@ type ParsedChecklistItem = {
 };
 
 type ReviewChecklistRow = ParsedChecklistItem & {
+  points: ChecklistCreditPoints | null;
   preRequirements: ReviewRequirement[];
   finalRequirements: ReviewRequirement[];
+};
+
+type ChecklistCreditPoints = {
+  availablePoints: number | null;
+  isRequired: boolean;
 };
 
 type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
@@ -155,6 +161,58 @@ const findColumnIndex = (header: string[], options: string[]): number => {
 };
 
 const isChecklistCreditCode = (value: string): boolean => /\b(?:mr|cr|m|credit)\s*\d+(?:\.\d+)?\b/i.test(value);
+
+const normalizeCreditCode = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const parseAvailablePoints = (value: string): ChecklistCreditPoints | null => {
+  const normalizedValue = normalizeHeader(value);
+  if (!normalizedValue) return null;
+
+  if (['required', 'mandatory', 'fixed'].some((label) => normalizedValue.includes(label))) {
+    return { availablePoints: null, isRequired: true };
+  }
+
+  const numericValue = Number(value.replace(/,/g, '').trim());
+  if (!Number.isFinite(numericValue)) return null;
+
+  return { availablePoints: numericValue, isRequired: false };
+};
+
+const parseChecklistCreditPoints = (sheets: ChecklistSheet[]): Map<string, ChecklistCreditPoints> => {
+  const pointsByCreditCode = new Map<string, ChecklistCreditPoints>();
+
+  for (const sheet of sheets) {
+    const headerIndex = sheet.rows.findIndex((row) => row.some((cell) => normalizeHeader(cell).includes('points available')));
+    if (headerIndex === -1) continue;
+
+    const header = sheet.rows[headerIndex];
+    const pointsIndex = findColumnIndex(header, ['points available']);
+    if (pointsIndex === -1) continue;
+
+    const candidateCodeIndexes = Array.from({ length: pointsIndex }, (_, index) => index);
+    const creditCodeIndex = candidateCodeIndexes
+      .map((index) => ({
+        index,
+        matches: sheet.rows.slice(headerIndex + 1).filter((row) => isChecklistCreditCode(row[index] || '')).length,
+      }))
+      .sort((first, second) => second.matches - first.matches)[0];
+
+    if (!creditCodeIndex || creditCodeIndex.matches === 0) continue;
+
+    for (const row of sheet.rows.slice(headerIndex + 1)) {
+      const creditCode = (row[creditCodeIndex.index] || '').trim();
+      if (!isChecklistCreditCode(creditCode)) continue;
+
+      const points = parseAvailablePoints(row[pointsIndex] || '');
+      const normalizedCode = normalizeCreditCode(creditCode);
+      if (!points || !normalizedCode || pointsByCreditCode.has(normalizedCode)) continue;
+
+      pointsByCreditCode.set(normalizedCode, points);
+    }
+  }
+
+  return pointsByCreditCode;
+};
 
 const parseChecklistRows = (sheets: ChecklistSheet[]): ParsedChecklistItem[] => {
   const items: ParsedChecklistItem[] = [];
@@ -281,8 +339,12 @@ const splitRequirementPoints = (requirement: string): string[] => {
 };
 
 const ensureReviewChecklistItems = async (type: ChecklistType): Promise<ReviewChecklistRow[]> => {
-  const workbookPath = await findReviewWorkbookPath(type);
+  const [workbookPath, pointsWorkbookPath] = await Promise.all([
+    findReviewWorkbookPath(type),
+    findWorkbookPath(path.join(CHECKLIST_ROOT, checklistFolders[type.toLowerCase()].folderName)),
+  ]);
   const rows = parseChecklistRows(readChecklistWorkbook(workbookPath));
+  const pointsByCreditCode = parseChecklistCreditPoints(readChecklistWorkbook(pointsWorkbookPath));
 
   if (rows.length === 0) {
     throw new Error(`No checklist rows found in ${path.basename(workbookPath)}`);
@@ -356,7 +418,12 @@ const ensureReviewChecklistItems = async (type: ChecklistType): Promise<ReviewCh
       });
     }
 
-    reviewRows.push({ ...row, preRequirements, finalRequirements });
+    reviewRows.push({
+      ...row,
+      points: pointsByCreditCode.get(normalizeCreditCode(row.creditName)) ?? null,
+      preRequirements,
+      finalRequirements,
+    });
   }
 
   return reviewRows;
@@ -806,6 +873,7 @@ export const getChecklistReview = async (req: Request, res: Response): Promise<v
         id: `${type}-${item.sourceSheet}-${item.sourceRow}`,
         creditName: item.creditName,
         subCreditName: item.subCreditName,
+        points: item.points,
         preRequirements: await Promise.all(item.preRequirements.map((requirement) => mapRequirement(requirement, 'pre'))),
         finalRequirements: await Promise.all(item.finalRequirements.map((requirement) => mapRequirement(requirement, 'final'))),
       };
