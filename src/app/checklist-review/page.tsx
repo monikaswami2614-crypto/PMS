@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import { logClientActivity } from '@/utils/activityLog';
+import ClientMailButton from '@/components/ClientMailButton';
 import styles from './page.module.css';
 
 type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
@@ -749,6 +750,12 @@ export default function ChecklistReviewPage() {
         </div>
 
         <div className={styles.summaryGroup}>
+          <ClientMailButton
+            projectId={effectiveSelectedProjectId}
+            projectName={review?.project.name || selectedProject?.name}
+            projectType={review?.project.type || (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType || undefined)}
+            disabled={isLoading || !review}
+          />
           <span className={styles.summaryPill}>{review?.project.type ?? (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType ?? 'Project')}</span>
           <span className={styles.summaryPill}>Pre {completedPre}/{preRequirements.length}</span>
           <span className={styles.summaryPill}>Final {completedFinal}/{finalRequirements.length}</span>

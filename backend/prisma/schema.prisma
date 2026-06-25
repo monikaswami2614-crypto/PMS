@@ -233,6 +233,27 @@ model Notification {
   @@index([type])
 }
 
+model EmailLog {
+  id                String   @id @default(cuid())
+  updateHash        String   @unique
+  recipientEmail    String
+  employeeName      String
+  projectName       String
+  projectType       String
+  deadline          String
+  statusMessage     String
+  deliveryStatus    String
+  providerMessageId String?
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([recipientEmail])
+  @@index([projectName])
+  @@index([deliveryStatus])
+  @@index([createdAt])
+}
+
 enum ValidationType {
   MISSING_FILE
   EMPTY_FOLDER

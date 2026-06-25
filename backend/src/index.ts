@@ -12,6 +12,8 @@ import checklistRoutes from './routes/checklists.js';
 import fileRoutes from './routes/files.js';
 import notificationRoutes from './routes/notifications.js';
 import activityLogRoutes from './routes/activityLogs.js';
+import mailRoutes from './routes/mail.js';
+import { startOwnerDailyProgressCron } from './jobs/ownerDailyProgressCron.js';
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +57,7 @@ app.use('/api/checklists', checklistRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/mail', mailRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -73,6 +76,7 @@ const startServer = async () => {
     const server = app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      startOwnerDailyProgressCron();
     });
 
     server.on('error', (error: NodeJS.ErrnoException) => {

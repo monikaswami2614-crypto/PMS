@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { EmailConfigurationError, sendMail } from '../services/emailService.js';
+import { EmailConfigurationError, EmailDeliveryError, sendMail } from '../services/emailService.js';
 import { logActivity } from '../services/activityLogService.js';
 import prisma from '../config/prisma.js';
 import { createNotificationOnce } from '../services/notificationService.js';
@@ -17,6 +17,12 @@ interface ProjectAssignmentBody {
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
 
 interface CalendarDeadlineInput {
   id?: string;
@@ -205,15 +211,31 @@ export const sendProjectAssignmentEmail = async (req: Request, res: Response): P
       '',
       'Thank You.',
     ].join('\n');
+    const html = [
+      '<h2>Project Assigned</h2>',
+      '<p>You have been assigned a project.</p>',
+      '<table style="border-collapse:collapse">',
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Project Type</strong></td><td>${escapeHtml(projectType)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Project Name</strong></td><td>${escapeHtml(projectName)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Assigned By</strong></td><td>${escapeHtml(managerName.trim())}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Manager Email</strong></td><td>${escapeHtml(managerEmail)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Deadline</strong></td><td>${escapeHtml(deadline)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Status</strong></td><td>${escapeHtml(status)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Priority</strong></td><td>${escapeHtml(priority)}</td></tr>`,
+      `<tr><td style="padding:4px 12px 4px 0"><strong>Notes</strong></td><td>${escapeHtml(notes || '-')}</td></tr>`,
+      '</table>',
+      '<p>Please complete the assigned work before the deadline.</p>',
+      '<p>Thank you.</p>',
+    ].join('');
 
     try {
-      await sendMail({ to: assigneeEmail, replyTo: managerEmail, subject, text });
+      const emailId = await sendMail({ to: assigneeEmail, subject, html, text });
       await logActivity({
         actionType: 'Email notification sent',
         moduleName: 'CALENDAR',
         projectName,
         description: `Assignment email sent to ${assigneeEmail} for "${projectName}".`,
-        newValue: { assigneeEmail, managerEmail, subject },
+        newValue: { assigneeEmail, managerEmail, subject, emailId },
         request: req,
       });
       await createNotificationOnce({
@@ -230,7 +252,7 @@ export const sendProjectAssignmentEmail = async (req: Request, res: Response): P
           actionType: 'Email notification failed',
           moduleName: 'CALENDAR',
           projectName,
-          description: `Assignment email was not sent for "${projectName}" because SMTP is not configured.`,
+          description: `Assignment email was not sent for "${projectName}" because Resend is not configured.`,
           metadata: { assigneeEmail, managerEmail, reason: error.message },
           request: req,
         });
@@ -244,9 +266,20 @@ export const sendProjectAssignmentEmail = async (req: Request, res: Response): P
         res.json({
           success: true,
           emailSent: false,
-          message: 'Deadline saved. Email was not sent because SMTP credentials are not configured.',
+          message: 'Deadline saved. Email was not sent because Resend is not configured.',
         });
         return;
+      }
+
+      if (error instanceof EmailDeliveryError) {
+        await logActivity({
+          actionType: 'Email notification failed',
+          moduleName: 'CALENDAR',
+          projectName,
+          description: `Resend failed to deliver the assignment email for "${projectName}".`,
+          metadata: { assigneeEmail, managerEmail, reason: error.message },
+          request: req,
+        });
       }
 
       await createNotificationOnce({

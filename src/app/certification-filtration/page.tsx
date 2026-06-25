@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, FolderClosed, Loader2, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
+import ClientMailButton from '@/components/ClientMailButton';
 import styles from '../checklist-review/page.module.css';
 
 type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
@@ -1368,6 +1369,12 @@ export default function CertificationFiltrationPage() {
         </div>
 
         <div className={`${styles.summaryGroup} ${styles.certificationFilterRight}`}>
+          <ClientMailButton
+            projectId={effectiveSelectedProjectId}
+            projectName={filtrationData?.project.name || selectedProject?.name}
+            projectType={filtrationData?.project.type || (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType || undefined)}
+            disabled={isLoading || !filtrationData}
+          />
           <select
             value={submissionMode}
             onChange={(event) => {

@@ -27,6 +27,7 @@ type SheetDeadlineRow = {
 };
 
 const GOOGLE_SHEET_SYNC_URL = '/api/google-sheet-calendar';
+const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 
 const statusLabels: Record<DeadlineStatus, string> = {
   todo: 'New',
@@ -494,6 +495,14 @@ export default function CalendarPage() {
 
       let createdCount = 0;
       let updatedCount = 0;
+      const employeeMailUpdates: Array<{
+        employeeName: string;
+        employeeEmail: string;
+        projectName: string;
+        projectType: string;
+        deadline: string;
+        statusMessage: string;
+      }> = [];
 
       for (const sheetRow of incomingRows.values()) {
         const matchedProject = selectableProjects.find(
@@ -533,6 +542,34 @@ export default function CalendarPage() {
           addTask(syncedTask);
           createdCount += 1;
           await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+
+        if (sheetRow.assignedTo && emailPattern.test(sheetRow.assigneeEmail) && sheetRow.deadline) {
+          employeeMailUpdates.push({
+            employeeName: sheetRow.assignedTo,
+            employeeEmail: sheetRow.assigneeEmail,
+            projectName: sheetRow.projectName,
+            projectType: sheetRow.projectType || projectTypeValue,
+            deadline: formatDisplayDate(sheetRow.deadline),
+            statusMessage: `${statusLabels[sheetRow.status]}${sheetRow.note ? ` - ${sheetRow.note}` : ''}`,
+          });
+        }
+      }
+
+      if (employeeMailUpdates.length > 0) {
+        try {
+          const mailResponse = await fetch(`${apiBase}/api/mail/calendar-updates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ updates: employeeMailUpdates }),
+          });
+
+          if (!mailResponse.ok && mailResponse.status !== 207) {
+            const payload = await mailResponse.json().catch(() => null);
+            console.warn('Employee calendar email sync failed:', payload?.error || mailResponse.statusText);
+          }
+        } catch (mailError) {
+          console.warn('Employee calendar email sync failed:', mailError);
         }
       }
 
