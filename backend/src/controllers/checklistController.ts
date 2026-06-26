@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import path from 'path';
+import { inflateSync } from 'zlib';
 import XLSX from 'xlsx';
 import prisma from '../config/prisma.js';
 import { logActivity } from '../services/activityLogService.js';
@@ -81,6 +82,67 @@ type DocumentUnderstanding = {
   layers: string[];
   metadata: string[];
 };
+
+const decodePdfString = (value: string): string => (
+  value
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\b/g, '\b')
+    .replace(/\\f/g, '\f')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\\\/g, '\\')
+    .replace(/\\([0-7]{1,3})/g, (_, octal: string) => String.fromCharCode(parseInt(octal, 8)))
+);
+
+const extractPdfText = (body: Buffer): string => {
+  const source = body.toString('latin1');
+  const streamPattern = /<<(.*?)>>\s*stream\r?\n?([\s\S]*?)\r?\n?endstream/g;
+  const textParts: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = streamPattern.exec(source)) !== null) {
+    const dictionary = match[1] ?? '';
+    const rawStream = Buffer.from(match[2] ?? '', 'latin1');
+    let stream = rawStream;
+
+    if (/FlateDecode/i.test(dictionary)) {
+      try {
+        stream = inflateSync(rawStream);
+      } catch {
+        continue;
+      }
+    }
+
+    const content = stream.toString('latin1');
+    const literalPattern = /\((?:\\.|[^\\)])*\)\s*(?:Tj|'|")/g;
+    const arrayPattern = /\[(.*?)\]\s*TJ/g;
+    let textMatch: RegExpExecArray | null;
+
+    while ((textMatch = literalPattern.exec(content)) !== null) {
+      textParts.push(decodePdfString(textMatch[0].replace(/\)\s*(?:Tj|'|")$/, '').replace(/^\(/, '')));
+    }
+
+    while ((textMatch = arrayPattern.exec(content)) !== null) {
+      const arrayText = textMatch[1] ?? '';
+      const arrayParts = Array.from(arrayText.matchAll(/\((?:\\.|[^\\)])*\)/g))
+        .map((part) => decodePdfString(part[0].slice(1, -1)))
+        .join('');
+      if (arrayParts.trim()) textParts.push(arrayParts);
+    }
+  }
+
+  return textParts.join('\n').replace(/[^\S\r\n]+/g, ' ').trim();
+};
+
+const pdfTextToRows = (text: string): string[][] => (
+  text
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s{2,}|\t+/).map((cell) => cell.trim()).filter(Boolean))
+);
 
 type SuggestedFileName = {
   fileId: string;
@@ -879,6 +941,44 @@ export const getChecklistTree = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to read checklist files' });
+  }
+};
+
+export const parseReviewResponseFile = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: 'Review response file is required' });
+      return;
+    }
+
+    const fileName = String(req.query.fileName ?? '').toLowerCase();
+    if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) {
+      res.status(400).json({ error: 'Word extraction is not available yet. Please upload Excel, CSV, or PDF.' });
+      return;
+    }
+
+    if (fileName.endsWith('.pdf')) {
+      const rows = pdfTextToRows(extractPdfText(body));
+      res.json({
+        message: 'PDF review response converted and parsed successfully',
+        data: rows,
+      });
+      return;
+    }
+
+    const workbook = fileName.endsWith('.csv') || fileName.endsWith('.txt')
+      ? XLSX.read(body.toString('utf8'), { type: 'string' })
+      : XLSX.read(body, { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
+
+    res.json({
+      message: 'Review response parsed successfully',
+      data: rows.map((row) => row.map((cell) => String(cell ?? '').trim())).filter((row) => row.some(Boolean)),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to parse review response file' });
   }
 };
 

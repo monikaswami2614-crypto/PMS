@@ -856,10 +856,6 @@ export default function ChecklistReviewPage() {
         </div>
 
         <div className={styles.summaryGroup}>
-          <span className={styles.summaryPill}>Available Points: {pointTotals.available}</span>
-          <span className={styles.summaryPill}>Targeted Points: {pointTotals.targeted}/{pointTotals.available}</span>
-          <span className={styles.summaryPill}>Not Targeted Points: {pointTotals.notTargeted}</span>
-          <span className={styles.summaryPill}>Rating: {getCertificationRating(pointTotals.targeted)}</span>
           <ClientMailButton
             projectId={effectiveSelectedProjectId}
             projectName={review?.project.name || selectedProject?.name}
@@ -886,7 +882,6 @@ export default function ChecklistReviewPage() {
               <thead>
                 <tr>
                   <th>Credit Name</th>
-                  <th>Sub Credit / Module Name</th>
                   <th>Pre Certification</th>
                   <th>Final Certification</th>
                 </tr>
@@ -896,10 +891,6 @@ export default function ChecklistReviewPage() {
                   <tr key={item.id}>
                     <td className={styles.creditCell}>
                       <div>{item.creditName || '-'}</div>
-                      {renderPointsSummary(item)}
-                    </td>
-                    <td>
-                      <div>{item.subCreditName ? renderHighlightedPointValues(item.subCreditName) : '-'}</div>
                     </td>
                     <td>{renderRequirements(item.preRequirements, 'pre')}</td>
                     <td>{renderRequirements(item.finalRequirements, 'final')}</td>

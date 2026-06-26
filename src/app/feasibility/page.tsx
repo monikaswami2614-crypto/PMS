@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { BadgeCheck, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { BadgeCheck, FileSpreadsheet, Loader2, Upload } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import styles from './page.module.css';
 
@@ -41,6 +41,14 @@ type ReviewResponse = {
   items: ReviewItem[];
 };
 
+type UploadedResponseCell = {
+  expected: string[];
+  pending: string[];
+  denied: string[];
+};
+
+type UploadedResponsesByProject = Record<string, Record<string, UploadedResponseCell>>;
+
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 
 const formatBytes = (bytes: number): string => {
@@ -67,6 +75,7 @@ const getDefaultSheetIndex = (sheets: ChecklistSheet[], checklistType: Checklist
 const selectedCreditsStorageKey = 'pms-feasibility-selected-credit-keys-by-project';
 const manualAchievableStorageKey = 'pms-feasibility-manual-achievable-by-project';
 const manualDoubtfulStorageKey = 'pms-feasibility-manual-doubtful-by-project';
+const reviewResponseStorageKey = 'pms-feasibility-review-response-by-project';
 const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 type SelectedCreditsByProject = Record<ChecklistType, Record<string, Record<string, boolean>>>;
 type ManualAchievableByProject = Record<ChecklistType, Record<string, Record<string, number>>>;
@@ -75,13 +84,16 @@ type ManualDoubtfulByProject = Record<ChecklistType, Record<string, Record<strin
 const creditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Cr|Credit)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
 
 const isCreditRow = (row: string[], rowIndex: number): boolean => {
-  if (rowIndex <= 1) return false;
+  const normalizedRow = normalizeHeader(row.join(' '));
+  if (normalizedRow.includes('credit name') || normalizedRow.includes('points available')) return false;
+  if (rowIndex <= 1 && !creditPattern.test(row.join(' '))) return false;
   const rowText = row.join(' ');
   return creditPattern.test(rowText);
 };
 
 const getCreditLabel = (row: string[]): string => (
   row.find((cell) => creditPattern.test(cell))
+  || row.join(' ').match(creditPattern)?.[0]
   || row.find((cell) => cell.trim())
   || 'credit'
 );
@@ -99,6 +111,86 @@ const normalizeCreditKey = (value: string): string => (
 const getCreditKey = (row: string[]): string => normalizeCreditKey(getCreditLabel(row));
 
 const normalizeHeader = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const emptyResponseCell = (): UploadedResponseCell => ({ expected: [], pending: [], denied: [] });
+
+const getResponseStatus = (value: string): keyof UploadedResponseCell | null => {
+  const normalized = normalizeHeader(value);
+  if (normalized.includes('expected')) return 'expected';
+  if (normalized.includes('pending')) return 'pending';
+  if (normalized.includes('denied')) return 'denied';
+  return null;
+};
+
+const getCreditMatchKeys = (creditCode: string, rowText: string): string[] => {
+  const keys = new Set<string>();
+  [creditCode, rowText, `${creditCode} ${rowText}`].forEach((value) => {
+    const normalized = normalizeCreditKey(value);
+    if (normalized) keys.add(normalized);
+  });
+  return Array.from(keys);
+};
+
+const parseReviewResponseRows = (rows: string[][]): Record<string, UploadedResponseCell> => {
+  const header = rows[0]?.map(normalizeHeader) ?? [];
+  const hasHeader = header.some(Boolean);
+  const creditColumn = header.findIndex((cell) => /credit|code|mr|cr/.test(cell));
+  const statusColumn = header.findIndex((cell) => /status|category|type/.test(cell));
+  const commentColumn = header.findIndex((cell) => /comment|remark|observation|description|query|response/.test(cell));
+  const responseColumns: Record<keyof UploadedResponseCell, number> = {
+    expected: header.findIndex((cell) => cell.includes('expected')),
+    pending: header.findIndex((cell) => cell.includes('pending')),
+    denied: header.findIndex((cell) => cell.includes('denied')),
+  };
+  const result: Record<string, UploadedResponseCell> = {};
+
+  rows.slice(hasHeader ? 1 : 0).forEach((row) => {
+    const rowText = row.join(' ').trim();
+    if (!rowText) return;
+
+    const creditText = creditColumn >= 0 ? row[creditColumn] ?? '' : rowText;
+    const creditMatch = creditText.match(creditPattern) ?? rowText.match(creditPattern);
+    if (!creditMatch) return;
+
+    const creditCode = creditMatch[0];
+    const keys = getCreditMatchKeys(creditCode, rowText);
+    const hasSeparateColumns = Object.values(responseColumns).some((index) => index >= 0 && (row[index] ?? '').trim());
+
+    if (hasSeparateColumns) {
+      keys.forEach((key) => {
+        result[key] = result[key] ?? emptyResponseCell();
+        (Object.entries(responseColumns) as Array<[keyof UploadedResponseCell, number]>).forEach(([status, index]) => {
+          const comment = index >= 0 ? (row[index] ?? '').trim() : '';
+          if (comment && !result[key][status].includes(comment)) result[key][status].push(comment);
+        });
+      });
+      return;
+    }
+
+    const status = statusColumn >= 0
+      ? getResponseStatus(row[statusColumn] ?? '')
+      : row.map(getResponseStatus).find(Boolean) ?? null;
+    if (!status) return;
+
+    const comment = (commentColumn >= 0 ? row[commentColumn] : '')
+      || row.filter((cell) => {
+        const normalized = normalizeHeader(cell);
+        return cell.trim()
+          && !creditPattern.test(cell)
+          && getResponseStatus(cell) === null
+          && !['accepted', 'approved', 'completed'].some((ignored) => normalized.includes(ignored));
+      }).join(' | ');
+    const trimmedComment = comment.trim();
+    if (!trimmedComment) return;
+
+    keys.forEach((key) => {
+      result[key] = result[key] ?? emptyResponseCell();
+      if (!result[key][status].includes(trimmedComment)) result[key][status].push(trimmedComment);
+    });
+  });
+
+  return result;
+};
 
 const getPointColumnIndexes = (sheet: ChecklistSheet): { available: number; achievable: number; doubtful: number; notTargeted: number } => {
   const headerRow = sheet.rows.find((row) => row.some((cell) => normalizeHeader(cell).includes('points available'))) ?? [];
@@ -229,6 +321,8 @@ export default function FeasibilityPage() {
   const [selectedCredits, setSelectedCredits] = useState<SelectedCreditsByProject>({ nb: {}, gh: {} });
   const [manualAchievable, setManualAchievable] = useState<ManualAchievableByProject>({ nb: {}, gh: {} });
   const [manualDoubtful, setManualDoubtful] = useState<ManualDoubtfulByProject>({ nb: {}, gh: {} });
+  const [reviewResponses, setReviewResponses] = useState<UploadedResponsesByProject>({});
+  const [uploadMessage, setUploadMessage] = useState('');
 
   const projectOptions = useMemo(() => (
     projects.filter((project) => {
@@ -265,6 +359,15 @@ export default function FeasibilityPage() {
       window.localStorage.removeItem(manualDoubtfulStorageKey);
       setManualDoubtful({ nb: {}, gh: {} });
     }
+
+    try {
+      const storedResponses = window.localStorage.getItem(reviewResponseStorageKey);
+      setReviewResponses(storedResponses ? JSON.parse(storedResponses) as UploadedResponsesByProject : {});
+    } catch {
+      window.localStorage.removeItem(reviewResponseStorageKey);
+      setReviewResponses({});
+    }
+
   }, []);
 
   useEffect(() => {
@@ -279,6 +382,10 @@ export default function FeasibilityPage() {
   useEffect(() => {
     window.localStorage.setItem(manualDoubtfulStorageKey, JSON.stringify(manualDoubtful));
   }, [manualDoubtful]);
+
+  useEffect(() => {
+    window.localStorage.setItem(reviewResponseStorageKey, JSON.stringify(reviewResponses));
+  }, [reviewResponses]);
 
   useEffect(() => {
     setSelectedProjectId((currentProjectId) => {
@@ -390,6 +497,7 @@ export default function FeasibilityPage() {
   const selectedCreditsForProject = selectedCredits[checklistType]?.[selectedProjectId] ?? {};
   const manualAchievableForProject = manualAchievable[checklistType]?.[selectedProjectId] ?? {};
   const manualDoubtfulForProject = manualDoubtful[checklistType]?.[selectedProjectId] ?? {};
+  const reviewResponsesForProject = reviewResponses[selectedProjectId] ?? {};
   const selectedCreditCount = activeCreditKeys.filter((key) => selectedCreditsForProject[key]).length;
   const areAllCreditsSelected = Boolean(selectedProjectId) && activeCreditKeys.length > 0 && selectedCreditCount === activeCreditKeys.length;
 
@@ -543,6 +651,51 @@ export default function FeasibilityPage() {
     });
   };
 
+  const getReviewResponseForRow = (row: string[]): UploadedResponseCell | null => {
+    const creditCode = getCreditLabel(row);
+    const keys = getCreditMatchKeys(creditCode, row.join(' '));
+    const exactMatch = keys.map((key) => reviewResponsesForProject[key]).find(Boolean);
+    if (exactMatch) return exactMatch;
+
+    const fuzzyKey = Object.keys(reviewResponsesForProject).find((responseKey) => (
+      keys.some((key) => responseKey === key || responseKey.includes(key) || key.includes(responseKey))
+    ));
+    return fuzzyKey ? reviewResponsesForProject[fuzzyKey] : null;
+  };
+
+  const handleReviewResponseUpload = async (file: File | null) => {
+    if (!file || !selectedProjectId) return;
+    setUploadMessage('');
+
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) {
+      setUploadMessage('Word upload accepted. This version extracts response columns from Excel/CSV/PDF files.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${apiBase}/api/checklists/review-response/parse?fileName=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: await file.arrayBuffer(),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setUploadMessage(payload?.error || 'Failed to parse review response file.');
+        return;
+      }
+
+      const rows = Array.isArray(payload?.data) ? payload.data as string[][] : [];
+      const mapped = parseReviewResponseRows(rows);
+      setReviewResponses((current) => ({ ...current, [selectedProjectId]: mapped }));
+      setUploadMessage(Object.keys(mapped).length > 0
+        ? `Review response uploaded. ${Object.keys(mapped).length} matched rows found.`
+        : 'Review response uploaded, but no Expected/Pending/Denied data was found.');
+    } catch {
+      setUploadMessage('Failed to upload review response. Please confirm backend is running.');
+    }
+  };
+
   return (
     <div className={styles.container}>
       <section className={`${styles.toolbar} glassmorphism`}>
@@ -563,6 +716,19 @@ export default function FeasibilityPage() {
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
+          <label className={styles.uploadButton}>
+            <Upload size={15} />
+            Upload Review Response
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,.txt,.pdf,.doc,.docx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={!selectedProjectId}
+              onChange={(event) => {
+                void handleReviewResponseUpload(event.target.files?.[0] ?? null);
+                event.target.value = '';
+              }}
+            />
+          </label>
           <div className={styles.filterGroup} aria-label="Feasibility checklist filter">
             {(['nb', 'gh'] as ChecklistType[]).map((type) => (
               <button
@@ -584,6 +750,7 @@ export default function FeasibilityPage() {
         <span>Total Achievable / Targeted Points <strong>{summary.achievable}</strong></span>
         <span>Total Not Targeted Points <strong>{summary.notTargeted}</strong></span>
         <span>Rating <strong>{getRating(summary.achievable)}</strong></span>
+        {uploadMessage && <span>{uploadMessage}</span>}
         {isReviewLoading && <span>Refreshing checklist status...</span>}
       </section>
 
@@ -641,6 +808,16 @@ export default function FeasibilityPage() {
                 <tbody>
                   {activeSheet.rows.map((row, rowIndex) => {
                     const sectionRow = isSectionRow(row, rowIndex);
+                    const isColumnHeaderRow = row.some((value) => normalizeHeader(value).includes('points available'));
+                    const isCredit = isCreditRow(row, rowIndex);
+                    const response = isCredit ? getReviewResponseForRow(row) : null;
+                    const renderResponseCell = (items?: string[], fallback = '-') => (
+                      items && items.length > 0 ? (
+                        <ul className={styles.responseList}>
+                          {items.map((item, itemIndex) => <li key={`${item}-${itemIndex}`}>{item}</li>)}
+                        </ul>
+                      ) : <span className={styles.noResponse}>{fallback}</span>
+                    );
                     return (
                     <tr key={`${activeSheet.name}-${rowIndex}`} className={sectionRow ? styles.sectionRow : ''}>
                       <td className={styles.checkboxCell}>
@@ -725,6 +902,27 @@ export default function FeasibilityPage() {
                           </td>
                         );
                       })}
+                      {isColumnHeaderRow ? (
+                        <>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Expected</td>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Pending</td>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Denied</td>
+                        </>
+                      ) : isCredit ? (
+                        <>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseDivider}`}>
+                            {response ? renderResponseCell(response.expected, '-') : <span className={styles.noResponse}>No response</span>}
+                          </td>
+                          <td className={styles.reviewResponseCell}>{response ? renderResponseCell(response.pending) : <span className={styles.noResponse}>-</span>}</td>
+                          <td className={styles.reviewResponseCell}>{response ? renderResponseCell(response.denied) : <span className={styles.noResponse}>-</span>}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseDivider}`}></td>
+                          <td className={styles.reviewResponseCell}></td>
+                          <td className={styles.reviewResponseCell}></td>
+                        </>
+                      )}
                     </tr>
                   );})}
                 </tbody>
