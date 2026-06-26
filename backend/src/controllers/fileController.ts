@@ -3,13 +3,23 @@ import { promises as fs } from 'fs';
 import { Request, Response } from 'express';
 import prisma from '../config/prisma.js';
 import { logActivity } from '../services/activityLogService.js';
+import { sendFilePreviewPage, sendInlineFile } from '../utils/filePreview.js';
 
 export const openFileEditor = async (req: Request, res: Response): Promise<void> => {
   try {
     const { fileId } = req.params;
     const file = await prisma.file.findUnique({
       where: { id: fileId },
-      select: { name: true, path: true, projectId: true, project: { select: { name: true } } },
+      select: {
+        name: true,
+        path: true,
+        relativePath: true,
+        extension: true,
+        size: true,
+        modifiedAt: true,
+        projectId: true,
+        project: { select: { name: true } },
+      },
     });
 
     if (!file) {
@@ -45,8 +55,34 @@ export const openFileEditor = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    res.setHeader('Content-Disposition', `inline; filename="${file.name.replace(/"/g, '')}"`);
-    res.sendFile(filePath);
+    sendFilePreviewPage(res, file, `${req.baseUrl}${req.path}/raw`);
+  } catch (error) {
+    res.status(500).send('Failed to open file');
+  }
+};
+
+export const openRawFile = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fileId } = req.params;
+    const file = await prisma.file.findUnique({
+      where: { id: fileId },
+      select: { name: true, path: true },
+    });
+
+    if (!file) {
+      res.status(404).send('File not found');
+      return;
+    }
+
+    const filePath = path.resolve(file.path);
+    try {
+      await fs.access(filePath);
+    } catch {
+      res.status(404).send('File not found on disk');
+      return;
+    }
+
+    sendInlineFile(res, filePath, file.name);
   } catch (error) {
     res.status(500).send('Failed to open file');
   }

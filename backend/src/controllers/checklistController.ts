@@ -5,6 +5,7 @@ import path from 'path';
 import XLSX from 'xlsx';
 import prisma from '../config/prisma.js';
 import { logActivity } from '../services/activityLogService.js';
+import { sendFilePreviewPage, sendInlineFile } from '../utils/filePreview.js';
 
 const CHECKLIST_ROOT = process.env.CHECKLIST_ROOT || 'C:\\Users\\monika.swami\\Desktop\\Leed Project';
 const CHECKLIST_REVIEW_ROOT = process.env.CHECKLIST_REVIEW_ROOT || 'C:\\Users\\monika.swami\\Desktop\\Leed Project\\checklist-review';
@@ -603,7 +604,38 @@ const getFilePathParts = (file: MatchedFile): string[] => {
 };
 
 const getFolderTokens = (value: string): string[] => {
-  return value.toLowerCase().match(/[a-z]+|\d+/g) ?? [];
+  return (value.toLowerCase().match(/[a-z]+|\d+/g) ?? [])
+    .map((token) => {
+      if (token === 'rwh') return 'rhw';
+      if (token === 'credit' || token === 'credits') return 'cr';
+      return token;
+    });
+};
+
+const containsTokenSequence = (folderTokens: string[], creditTokens: string[]): boolean => {
+  if (folderTokens.length < creditTokens.length) return false;
+  return folderTokens.some((_, startIndex) => (
+    creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
+  ));
+};
+
+const folderMatchesCreditTokens = (folderTokens: string[], creditTokens: string[]): boolean => {
+  if (containsTokenSequence(folderTokens, creditTokens)) return true;
+
+  const creditIndex = creditTokens.indexOf('cr');
+  if (creditIndex === -1) return false;
+
+  const prefixTokens = creditTokens.slice(0, creditIndex + 1);
+  const numberTokens = creditTokens.slice(creditIndex + 1).filter((token) => /^\d+$/.test(token));
+  if (numberTokens.length === 0 || !containsTokenSequence(folderTokens, prefixTokens)) return false;
+
+  let searchIndex = folderTokens.indexOf(prefixTokens[prefixTokens.length - 1]) + 1;
+  return numberTokens.every((token) => {
+    const foundIndex = folderTokens.indexOf(token, searchIndex);
+    if (foundIndex === -1) return false;
+    searchIndex = foundIndex + 1;
+    return true;
+  });
 };
 
 const isClientDataFile = (file: MatchedFile): boolean => {
@@ -619,10 +651,7 @@ const isCreditFolderFile = (file: MatchedFile, creditName: string): boolean => {
 
   return getFilePathParts(file).some((part) => {
     const folderTokens = getFolderTokens(part);
-    if (folderTokens.length < creditTokens.length) return false;
-    return folderTokens.some((_, startIndex) => {
-      return creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token);
-    });
+    return folderMatchesCreditTokens(folderTokens, creditTokens);
   });
 };
 
@@ -634,10 +663,7 @@ const getCreditFolderDepth = (file: MatchedFile, creditName: string): number | n
   const folderParts = pathParts.slice(0, -1);
   const creditFolderIndex = folderParts.findIndex((part) => {
     const folderTokens = getFolderTokens(part);
-    if (folderTokens.length < creditTokens.length) return false;
-    return folderTokens.some((_, startIndex) => (
-      creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
-    ));
+    return folderMatchesCreditTokens(folderTokens, creditTokens);
   });
 
   if (creditFolderIndex === -1) return null;
@@ -659,11 +685,36 @@ const getCreditFolderSearchTerms = (creditName: string): string[] => {
   const tokens = getFolderTokens(creditName);
   if (tokens.length === 0) return [];
 
+  const rawTokens = creditName.toLowerCase().match(/[a-z]+|\d+/g) ?? [];
   const terms = new Set<string>([
     creditName,
     tokens.join(' '),
     tokens.join('-'),
+    rawTokens.join(' '),
+    rawTokens.join('-'),
   ]);
+
+  if (tokens.includes('rhw')) {
+    const rwhTokens = tokens.map((token) => (token === 'rhw' ? 'rwh' : token));
+    terms.add(rwhTokens.join(' '));
+    terms.add(rwhTokens.join('-'));
+    terms.add(rwhTokens.join(''));
+  }
+
+  if (tokens.includes('cr')) {
+    const creditTokens = tokens.map((token) => (token === 'cr' ? 'credit' : token));
+    terms.add(creditTokens.join(' '));
+    terms.add(creditTokens.join('-'));
+    terms.add(creditTokens.join(''));
+
+    const creditIndex = tokens.indexOf('cr');
+    const firstCreditNumber = tokens.slice(creditIndex + 1).find((token) => /^\d+$/.test(token));
+    if (firstCreditNumber) {
+      const prefixTokens = tokens.slice(0, creditIndex);
+      terms.add([...prefixTokens, 'cr', firstCreditNumber].join(' '));
+      terms.add([...prefixTokens, 'credit', firstCreditNumber].join(' '));
+    }
+  }
 
   if (tokens.length >= 3 && /^\d+$/.test(tokens[tokens.length - 1])) {
     const prefix = tokens.slice(0, -1).join(' ');
@@ -671,6 +722,20 @@ const getCreditFolderSearchTerms = (creditName: string): string[] => {
     terms.add(`${prefix}${number}`);
     terms.add(`${prefix}-${number}`);
     terms.add(`${prefix} ${number}`);
+
+    if (tokens.includes('rhw')) {
+      const rwhPrefix = tokens.slice(0, -1).map((token) => (token === 'rhw' ? 'rwh' : token)).join(' ');
+      terms.add(`${rwhPrefix}${number}`);
+      terms.add(`${rwhPrefix}-${number}`);
+      terms.add(`${rwhPrefix} ${number}`);
+    }
+
+    if (tokens.includes('cr')) {
+      const creditPrefix = tokens.slice(0, -1).map((token) => (token === 'cr' ? 'credit' : token)).join(' ');
+      terms.add(`${creditPrefix}${number}`);
+      terms.add(`${creditPrefix}-${number}`);
+      terms.add(`${creditPrefix} ${number}`);
+    }
   }
 
   return Array.from(terms).filter(Boolean);
@@ -1296,7 +1361,7 @@ export const previewChecklistMatchedFile = async (req: Request, res: Response): 
     const { projectId, fileId } = req.params;
     const file = await prisma.file.findFirst({
       where: { id: fileId, projectId },
-      select: { name: true, path: true },
+      select: { name: true, path: true, relativePath: true, extension: true, size: true, modifiedAt: true },
     });
 
     if (!file) {
@@ -1322,9 +1387,35 @@ export const previewChecklistMatchedFile = async (req: Request, res: Response): 
       return;
     }
 
-    res.setHeader('Content-Disposition', `inline; filename="${file.name.replace(/"/g, '')}"`);
-    res.sendFile(filePath);
+    sendFilePreviewPage(res, file, `${req.baseUrl}${req.path}/raw`);
   } catch (error) {
     res.status(500).json({ error: 'Failed to open file preview' });
+  }
+};
+
+export const previewChecklistMatchedFileRaw = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { projectId, fileId } = req.params;
+    const file = await prisma.file.findFirst({
+      where: { id: fileId, projectId },
+      select: { name: true, path: true },
+    });
+
+    if (!file) {
+      res.status(404).send('File not found');
+      return;
+    }
+
+    const filePath = path.resolve(file.path);
+    try {
+      await fs.access(filePath);
+    } catch {
+      res.status(404).send('File not found on disk');
+      return;
+    }
+
+    sendInlineFile(res, filePath, file.name);
+  } catch (error) {
+    res.status(500).send('Failed to open file preview');
   }
 };

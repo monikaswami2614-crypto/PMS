@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { filterChecklistFilesByRequirement, getChecklistFiltration, getChecklistReview, getChecklistTree, matchClientDataToRequirements, previewChecklistMatchedFile, suggestChecklistFileNames, updateChecklistReviewStatus } from '../controllers/checklistController.js';
+import { filterChecklistFilesByRequirement, getChecklistFiltration, getChecklistReview, getChecklistTree, matchClientDataToRequirements, previewChecklistMatchedFile, previewChecklistMatchedFileRaw, suggestChecklistFileNames, updateChecklistReviewStatus } from '../controllers/checklistController.js';
 
 const router: Router = express.Router();
 
@@ -9,6 +9,7 @@ router.post('/review/:projectId/files/ai-filter', filterChecklistFilesByRequirem
 router.post('/review/:projectId/files/match-client-data', matchClientDataToRequirements);
 router.post('/review/:projectId/files/suggest-names', suggestChecklistFileNames);
 router.patch('/review/:projectId/items/:itemId', updateChecklistReviewStatus);
+router.get('/review/:projectId/files/:fileId/preview/raw', previewChecklistMatchedFileRaw);
 router.get('/review/:projectId/files/:fileId/preview', previewChecklistMatchedFile);
 router.get('/:type', getChecklistTree);
 

@@ -41,6 +41,7 @@ type FiltrationGroup = {
   subCreditName: string;
   requirements: FiltrationRequirement[];
   submissionFiles?: FiltrationFile[];
+  supportingFiles?: FiltrationFile[];
 };
 
 type FiltrationResponse = {
@@ -668,7 +669,10 @@ export default function CertificationFiltrationPage() {
       file.creditName === group.creditName && file.subCreditName === group.subCreditName
     ));
     const finalFileIds = new Set(getFinalFiles(group).map((file) => file.id));
-    const nestedCreditFiles = getCreditSubmissionFiles(group).filter((file) => (
+    const nestedCreditFiles = [
+      ...getCreditSupportingFiles(group),
+      ...getCreditSubmissionFiles(group),
+    ].filter((file) => (
       matchesSubmissionMode(file)
       && getCreditFolderDepth(file, group.creditName) !== null
       && (getCreditFolderDepth(file, group.creditName) ?? 0) > 0
@@ -682,14 +686,55 @@ export default function CertificationFiltrationPage() {
     finalFiles.filter((file) => file.creditName === group.creditName && file.subCreditName === group.subCreditName)
   );
 
-  const getCreditSubmissionFiles = (group: FiltrationGroup): SheetFile[] => (
-    (group.submissionFiles ?? []).map((file) => ({
+  const getCreditScopedFiles = (group: FiltrationGroup, files: FiltrationFile[] = [], scope: 'submission' | 'supporting'): SheetFile[] => (
+    files.map((file) => ({
       ...toSheetFile(file, group),
-      clientId: `${group.id}-submission-${file.id}`,
+      clientId: `${group.id}-${scope}-${file.id}`,
     }))
   );
 
-  const getFolderTokens = (value: string): string[] => value.toLowerCase().match(/[a-z]+|\d+/g) ?? [];
+  const getCreditSubmissionFiles = (group: FiltrationGroup): SheetFile[] => (
+    getCreditScopedFiles(group, group.submissionFiles, 'submission')
+  );
+
+  const getCreditSupportingFiles = (group: FiltrationGroup): SheetFile[] => (
+    getCreditScopedFiles(group, group.supportingFiles, 'supporting')
+  );
+
+  const getFolderTokens = (value: string): string[] => (
+    (value.toLowerCase().match(/[a-z]+|\d+/g) ?? [])
+      .map((token) => {
+        if (token === 'rwh') return 'rhw';
+        if (token === 'credit' || token === 'credits') return 'cr';
+        return token;
+      })
+  );
+
+  const containsTokenSequence = (folderTokens: string[], creditTokens: string[]): boolean => {
+    if (folderTokens.length < creditTokens.length) return false;
+    return folderTokens.some((_, startIndex) => (
+      creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
+    ));
+  };
+
+  const folderMatchesCreditTokens = (folderTokens: string[], creditTokens: string[]): boolean => {
+    if (containsTokenSequence(folderTokens, creditTokens)) return true;
+
+    const creditIndex = creditTokens.indexOf('cr');
+    if (creditIndex === -1) return false;
+
+    const prefixTokens = creditTokens.slice(0, creditIndex + 1);
+    const numberTokens = creditTokens.slice(creditIndex + 1).filter((token) => /^\d+$/.test(token));
+    if (numberTokens.length === 0 || !containsTokenSequence(folderTokens, prefixTokens)) return false;
+
+    let searchIndex = folderTokens.indexOf(prefixTokens[prefixTokens.length - 1]) + 1;
+    return numberTokens.every((token) => {
+      const foundIndex = folderTokens.indexOf(token, searchIndex);
+      if (foundIndex === -1) return false;
+      searchIndex = foundIndex + 1;
+      return true;
+    });
+  };
 
   const getCreditFolderDepth = (file: SheetFile, creditName: string): number | null => {
     const creditTokens = getFolderTokens(creditName);
@@ -699,10 +744,7 @@ export default function CertificationFiltrationPage() {
     const folderParts = pathParts.slice(0, -1);
     const creditFolderIndex = folderParts.findIndex((part) => {
       const folderTokens = getFolderTokens(part);
-      if (folderTokens.length < creditTokens.length) return false;
-      return folderTokens.some((_, startIndex) => (
-        creditTokens.every((token, offset) => folderTokens[startIndex + offset] === token)
-      ));
+      return folderMatchesCreditTokens(folderTokens, creditTokens);
     });
 
     if (creditFolderIndex === -1) return null;
