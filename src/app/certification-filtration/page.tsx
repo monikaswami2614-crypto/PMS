@@ -1455,16 +1455,16 @@ export default function CertificationFiltrationPage() {
           <div className={styles.certificationMetaPills}>
             <span className={styles.summaryPill}>{filtrationData?.project.type ?? (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType ?? 'Project')}</span>
             <span className={styles.summaryPill}>{filtrationData?.groups.length ?? 0} Credits</span>
+            <ClientMailButton
+              projectId={effectiveSelectedProjectId}
+              projectName={filtrationData?.project.name || selectedProject?.name}
+              projectType={filtrationData?.project.type || (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType || undefined)}
+              disabled={isLoading || !filtrationData}
+            />
           </div>
         </div>
 
         <div className={`${styles.summaryGroup} ${styles.certificationFilterRight}`}>
-          <ClientMailButton
-            projectId={effectiveSelectedProjectId}
-            projectName={filtrationData?.project.name || selectedProject?.name}
-            projectType={filtrationData?.project.type || (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType || undefined)}
-            disabled={isLoading || !filtrationData}
-          />
           <select
             value={submissionMode}
             onChange={(event) => {
