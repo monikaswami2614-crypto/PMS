@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   SlidersHorizontal,
+  BadgeCheck,
 } from 'lucide-react';
 import styles from './Sidebar.module.css';
 
@@ -48,6 +49,7 @@ export const Sidebar: React.FC = () => {
     { name: 'All Project List', path: '/tasks', icon: ListTodo },
     { name: 'Checklist Review', path: '/checklist-review', icon: ClipboardCheck },
     { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
+    { name: 'Feasibility', path: '/feasibility', icon: BadgeCheck },
     { name: 'Calendar', path: '/calendar', icon: Calendar },
     { name: 'Team Members', path: '/team', icon: Users },
     { name: 'Activity Logs', path: '/activity-logs', icon: History },

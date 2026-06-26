@@ -249,6 +249,8 @@ export const Header: React.FC = () => {
         return 'Checklist Review';
       case '/certification-filtration':
         return 'Data Filtration';
+      case '/feasibility':
+        return 'Feasibility';
       case '/calendar':
         return 'Project Calendar';
       case '/team':

@@ -145,6 +145,8 @@ const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 const selectedProjectStorageKey = 'certification-filtration-selected-project';
 const selectedProjectChangeEvent = 'certification-filtration-project-change';
 const workflowFilesStoragePrefix = 'certification-filtration-workflow-files';
+const selectedFeasibilityCreditsStorageKey = 'pms-feasibility-selected-credit-keys-by-project';
+const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 
 const subscribeToSelectedProject = (onStoreChange: () => void) => {
   window.addEventListener('storage', onStoreChange);
@@ -222,6 +224,7 @@ export default function CertificationFiltrationPage() {
   const [manuallyCheckedRequirementIds, setManuallyCheckedRequirementIds] = useState<Record<string, boolean>>({});
   const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
   const [hydratedWorkflowKey, setHydratedWorkflowKey] = useState('');
+  const [selectedFeasibilityCredits, setSelectedFeasibilityCredits] = useState<Record<'nb' | 'gh', Record<string, Record<string, boolean>>>>({ nb: {}, gh: {} });
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -255,6 +258,29 @@ export default function CertificationFiltrationPage() {
     if (!workflowFilesStorageKey || hydratedWorkflowKey !== workflowFilesStorageKey) return;
     window.localStorage.setItem(workflowFilesStorageKey, JSON.stringify({ supportingFiles, finalFiles }));
   }, [finalFiles, hydratedWorkflowKey, supportingFiles, workflowFilesStorageKey]);
+
+  useEffect(() => {
+    const loadSelectedFeasibilityCredits = () => {
+      try {
+        const storedSelection = window.localStorage.getItem(selectedFeasibilityCreditsStorageKey);
+        const parsed = storedSelection
+          ? JSON.parse(storedSelection) as Partial<Record<'nb' | 'gh', Record<string, Record<string, boolean>>>>
+          : null;
+        setSelectedFeasibilityCredits({ nb: parsed?.nb ?? {}, gh: parsed?.gh ?? {} });
+      } catch {
+        window.localStorage.removeItem(selectedFeasibilityCreditsStorageKey);
+        setSelectedFeasibilityCredits({ nb: {}, gh: {} });
+      }
+    };
+
+    loadSelectedFeasibilityCredits();
+    window.addEventListener('storage', loadSelectedFeasibilityCredits);
+    window.addEventListener(feasibilitySelectionChangeEvent, loadSelectedFeasibilityCredits);
+    return () => {
+      window.removeEventListener('storage', loadSelectedFeasibilityCredits);
+      window.removeEventListener(feasibilitySelectionChangeEvent, loadSelectedFeasibilityCredits);
+    };
+  }, []);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) {
@@ -464,6 +490,16 @@ export default function CertificationFiltrationPage() {
     return mainCreditName ? `${group.creditName} (${mainCreditName})` : group.creditName;
   };
 
+  const normalizeCreditKey = (value: string): string => (
+    (value.toLowerCase().match(/[a-z]+|\d+/g) ?? [])
+      .map((token) => {
+        if (token === 'rwh') return 'rhw';
+        if (token === 'credit' || token === 'credits') return 'cr';
+        return token;
+      })
+      .join('')
+  );
+
   const getCreditColorClass = (group: FiltrationGroup) => {
     const creditText = `${group.creditName} ${group.subCreditName}`.trim().toLowerCase();
 
@@ -569,9 +605,21 @@ export default function CertificationFiltrationPage() {
   const visibleGroups = (() => {
     const query = creditSearch.trim().toLowerCase();
     const groups = filtrationData?.groups ?? [];
-    if (!query) return groups;
+    const checklistType = (filtrationData?.project.type === 'GH' || inferredType === 'GREEN_HOMES') ? 'gh' : 'nb';
+    const selectedCreditKeys = selectedFeasibilityCredits[checklistType]?.[effectiveSelectedProjectId] ?? {};
+    const activeSelectedCreditKeys = Object.entries(selectedCreditKeys)
+      .filter(([, selected]) => selected)
+      .map(([key]) => key);
+    const feasibilityFilteredGroups = activeSelectedCreditKeys.length === 0
+      ? groups
+      : groups.filter((group) => {
+        const groupCreditKey = normalizeCreditKey(group.creditName);
+        return activeSelectedCreditKeys.some((selectedKey) => groupCreditKey === selectedKey || groupCreditKey.endsWith(selectedKey));
+      });
 
-    return groups.filter((group) => (
+    if (!query) return feasibilityFilteredGroups;
+
+    return feasibilityFilteredGroups.filter((group) => (
       group.creditName.toLowerCase().includes(query)
       || group.subCreditName.toLowerCase().includes(query)
       || getCreditTitle(group).toLowerCase().includes(query)
@@ -590,7 +638,7 @@ export default function CertificationFiltrationPage() {
 
   useEffect(() => {
     setActiveCreditIndex(0);
-  }, [creditSearch, effectiveSelectedProjectId, phase, creditViewMode]);
+  }, [creditSearch, effectiveSelectedProjectId, phase, creditViewMode, selectedFeasibilityCredits]);
 
   const sortFilesForDisplay = (files: SheetFile[]) => (
     [...files].sort((firstFile, secondFile) => {
