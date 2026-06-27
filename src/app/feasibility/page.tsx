@@ -3,6 +3,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, FileSpreadsheet, Loader2, Upload } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
+import {
+  CertificationPhase,
+  ChecklistStatusesByScope,
+  SubmissionRound,
+  checklistStatusChangeEvent,
+  feasibilitySelectionChangeEvent,
+  getCertificationScopeKey,
+  getManualPointsScopeStorageKey,
+  getReviewResponseScopeStorageKey,
+  getSelectedCreditsScopeStorageKey,
+  readChecklistStatuses,
+  updateChecklistStatusesForScope,
+} from '@/utils/certificationWorkflow';
 import styles from './page.module.css';
 
 type ChecklistType = 'nb' | 'gh';
@@ -23,6 +36,7 @@ type ChecklistWorkbook = {
 };
 
 type ReviewRequirement = {
+  id: string;
   status: RequirementStatus;
 };
 
@@ -52,6 +66,7 @@ type UploadedResponseRecord = {
   parsedRows: string[][];
   mappedResponses: Record<string, UploadedResponseCell>;
   uploadedAt: string;
+  autoSelectedCreditKeys?: string[];
 };
 
 type UploadedResponsesByScope = Record<string, UploadedResponseRecord>;
@@ -84,16 +99,9 @@ const manualAchievableStorageKey = 'pms-feasibility-manual-achievable-by-project
 const manualDoubtfulStorageKey = 'pms-feasibility-manual-doubtful-by-project';
 const reviewResponseStorageKey = 'pms-feasibility-review-response-by-project';
 const currentStateStorageKey = 'feasibility_current_state';
-const submissionType = 'pre';
-const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 type SelectedCreditsByProject = Record<ChecklistType, Record<string, Record<string, boolean>>>;
 type ManualAchievableByProject = Record<ChecklistType, Record<string, Record<string, number>>>;
 type ManualDoubtfulByProject = Record<ChecklistType, Record<string, Record<string, number>>>;
-
-const getScopeKey = (projectId: string, type: ChecklistType): string => `${projectId}_${type.toUpperCase()}_${submissionType}`;
-const getSelectedCreditsScopeStorageKey = (scopeKey: string): string => `feasibility_selected_credits_${scopeKey}`;
-const getManualPointsScopeStorageKey = (scopeKey: string): string => `feasibility_manual_points_${scopeKey}`;
-const getReviewResponseScopeStorageKey = (scopeKey: string): string => `feasibility_review_response_${scopeKey}`;
 
 const creditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Cr|Credit|Mandatory\s+Requirement)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
 
@@ -315,12 +323,23 @@ const getAvailablePoints = (row: string[], sheet: ChecklistSheet): number | null
   return Math.min(100, Number(value));
 };
 
-const getReviewCreditStatus = (item?: ReviewItem): 'checked' | 'missing' | 'pending' => {
+const getReviewCreditStatus = (
+  item: ReviewItem | undefined,
+  phase: CertificationPhase,
+  submissionRound: SubmissionRound,
+  scopedStatuses: Record<string, RequirementStatus>,
+): 'checked' | 'missing' | 'pending' => {
   if (!item) return 'missing';
-  const statuses = [...item.preRequirements, ...item.finalRequirements].map((requirement) => requirement.status);
-  if (statuses.some((status) => status === 'checked' || status === 'overridden')) return 'checked';
-  if (statuses.some((status) => status === 'missing')) return 'missing';
-  return 'pending';
+  const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
+  if (requirements.length === 0) return 'missing';
+  const statuses = requirements.map((requirement) => (
+    scopedStatuses[requirement.id]
+      ?? (submissionRound === 'first' ? requirement.status : 'pending')
+  ));
+  const fulfilledCount = statuses.filter((status) => status === 'checked' || status === 'overridden').length;
+  if (fulfilledCount === statuses.length) return 'checked';
+  if (statuses.some((status) => status === 'pending') || fulfilledCount > 0) return 'pending';
+  return 'missing';
 };
 
 const clampAchievablePoints = (value: number, availablePoints: number): number => (
@@ -408,6 +427,9 @@ export default function FeasibilityPage() {
   const [uploadMessage, setUploadMessage] = useState('');
   const [hydratedScopeKey, setHydratedScopeKey] = useState('');
   const [reviewFileMenu, setReviewFileMenu] = useState<{ x: number; y: number } | null>(null);
+  const [certificationPhase, setCertificationPhase] = useState<CertificationPhase>('pre');
+  const [submissionRound, setSubmissionRound] = useState<SubmissionRound>('first');
+  const [workflowStatuses, setWorkflowStatuses] = useState<ChecklistStatusesByScope>({});
 
   const projectOptions = useMemo(() => (
     projects.filter((project) => {
@@ -420,12 +442,23 @@ export default function FeasibilityPage() {
   useEffect(() => {
     try {
       const storedState = window.localStorage.getItem(currentStateStorageKey);
-      const parsedState = storedState ? JSON.parse(storedState) as Partial<{ selectedProjectId: string; checklistType: ChecklistType; submissionType: string }> : null;
+      const parsedState = storedState ? JSON.parse(storedState) as Partial<{
+        selectedProjectId: string;
+        checklistType: ChecklistType;
+        certificationPhase: CertificationPhase;
+        submissionRound: SubmissionRound;
+      }> : null;
       if (parsedState?.checklistType === 'nb' || parsedState?.checklistType === 'gh') {
         setChecklistType(parsedState.checklistType);
       }
       if (parsedState?.selectedProjectId) {
         setSelectedProjectId(parsedState.selectedProjectId);
+      }
+      if (parsedState?.certificationPhase === 'pre' || parsedState?.certificationPhase === 'final') {
+        setCertificationPhase(parsedState.certificationPhase);
+      }
+      if (parsedState?.submissionRound === 'first' || parsedState?.submissionRound === 'second') {
+        setSubmissionRound(parsedState.submissionRound);
       }
     } catch {
       window.localStorage.removeItem(currentStateStorageKey);
@@ -466,6 +499,14 @@ export default function FeasibilityPage() {
       setReviewResponses({});
     }
 
+    const loadWorkflowStatuses = () => setWorkflowStatuses(readChecklistStatuses());
+    loadWorkflowStatuses();
+    window.addEventListener('storage', loadWorkflowStatuses);
+    window.addEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+    return () => {
+      window.removeEventListener('storage', loadWorkflowStatuses);
+      window.removeEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+    };
   }, []);
 
   useEffect(() => {
@@ -485,16 +526,19 @@ export default function FeasibilityPage() {
     window.localStorage.setItem(reviewResponseStorageKey, JSON.stringify(reviewResponses));
   }, [reviewResponses]);
 
-  const currentScopeKey = selectedProjectId ? getScopeKey(selectedProjectId, checklistType) : '';
+  const currentScopeKey = selectedProjectId
+    ? getCertificationScopeKey(selectedProjectId, checklistType, certificationPhase, submissionRound)
+    : '';
 
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem(currentStateStorageKey, JSON.stringify({
       selectedProjectId,
       checklistType,
-      submissionType,
+      certificationPhase,
+      submissionRound,
     }));
-  }, [checklistType, selectedProjectId]);
+  }, [certificationPhase, checklistType, selectedProjectId, submissionRound]);
 
   useEffect(() => {
     if (!currentScopeKey || !selectedProjectId) return;
@@ -508,7 +552,7 @@ export default function FeasibilityPage() {
           ...current,
           [checklistType]: {
             ...(current[checklistType] ?? {}),
-            [selectedProjectId]: parsed,
+            [currentScopeKey]: parsed,
           },
         }));
       }
@@ -524,14 +568,14 @@ export default function FeasibilityPage() {
           ...current,
           [checklistType]: {
             ...(current[checklistType] ?? {}),
-            [selectedProjectId]: parsed.achievable ?? {},
+            [currentScopeKey]: parsed.achievable ?? {},
           },
         }));
         setManualDoubtful((current) => ({
           ...current,
           [checklistType]: {
             ...(current[checklistType] ?? {}),
-            [selectedProjectId]: parsed.doubtful ?? {},
+            [currentScopeKey]: parsed.doubtful ?? {},
           },
         }));
       }
@@ -544,24 +588,38 @@ export default function FeasibilityPage() {
       if (scopedResponse) {
         const parsed = JSON.parse(scopedResponse) as UploadedResponseRecord;
         setReviewResponses((current) => ({ ...current, [currentScopeKey]: parsed }));
+      } else if (submissionRound === 'second') {
+        const firstSubmissionScopeKey = getCertificationScopeKey(
+          selectedProjectId,
+          checklistType,
+          certificationPhase,
+          'first',
+        );
+        const firstSubmissionResponse = window.localStorage.getItem(
+          getReviewResponseScopeStorageKey(firstSubmissionScopeKey),
+        );
+        if (firstSubmissionResponse) {
+          const parsed = JSON.parse(firstSubmissionResponse) as UploadedResponseRecord;
+          setReviewResponses((current) => ({ ...current, [firstSubmissionScopeKey]: parsed }));
+        }
       }
     } catch {
       window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentScopeKey));
     }
     setHydratedScopeKey(currentScopeKey);
-  }, [checklistType, currentScopeKey, selectedProjectId]);
+  }, [certificationPhase, checklistType, currentScopeKey, selectedProjectId, submissionRound]);
 
   useEffect(() => {
     if (!currentScopeKey || !selectedProjectId || hydratedScopeKey !== currentScopeKey) return;
-    const selectedForScope = selectedCredits[checklistType]?.[selectedProjectId] ?? {};
+    const selectedForScope = selectedCredits[checklistType]?.[currentScopeKey] ?? {};
     window.localStorage.setItem(getSelectedCreditsScopeStorageKey(currentScopeKey), JSON.stringify(selectedForScope));
   }, [checklistType, currentScopeKey, hydratedScopeKey, selectedCredits, selectedProjectId]);
 
   useEffect(() => {
     if (!currentScopeKey || !selectedProjectId || hydratedScopeKey !== currentScopeKey) return;
     window.localStorage.setItem(getManualPointsScopeStorageKey(currentScopeKey), JSON.stringify({
-      achievable: manualAchievable[checklistType]?.[selectedProjectId] ?? {},
-      doubtful: manualDoubtful[checklistType]?.[selectedProjectId] ?? {},
+      achievable: manualAchievable[checklistType]?.[currentScopeKey] ?? {},
+      doubtful: manualDoubtful[checklistType]?.[currentScopeKey] ?? {},
     }));
   }, [checklistType, currentScopeKey, hydratedScopeKey, manualAchievable, manualDoubtful, selectedProjectId]);
 
@@ -689,11 +747,22 @@ export default function FeasibilityPage() {
       .map((row, rowIndex) => (isCreditRow(row, rowIndex) ? getCreditKey(row) : ''))
       .filter(Boolean)));
   }, [activeSheet]);
-  const selectedCreditsForProject = selectedCredits[checklistType]?.[selectedProjectId] ?? {};
-  const manualAchievableForProject = manualAchievable[checklistType]?.[selectedProjectId] ?? {};
-  const manualDoubtfulForProject = manualDoubtful[checklistType]?.[selectedProjectId] ?? {};
-  const currentReviewResponse = currentScopeKey ? reviewResponses[currentScopeKey] : undefined;
+  const selectedCreditsForProject = selectedCredits[checklistType]?.[currentScopeKey] ?? {};
+  const manualAchievableForProject = manualAchievable[checklistType]?.[currentScopeKey] ?? {};
+  const manualDoubtfulForProject = manualDoubtful[checklistType]?.[currentScopeKey] ?? {};
+  const firstSubmissionScopeKey = selectedProjectId
+    ? getCertificationScopeKey(selectedProjectId, checklistType, certificationPhase, 'first')
+    : '';
+  const currentReviewResponseScopeKey = reviewResponses[currentScopeKey]
+    ? currentScopeKey
+    : submissionRound === 'second'
+      ? firstSubmissionScopeKey
+      : currentScopeKey;
+  const currentReviewResponse = currentReviewResponseScopeKey
+    ? reviewResponses[currentReviewResponseScopeKey]
+    : undefined;
   const reviewResponsesForProject = currentReviewResponse?.mappedResponses ?? {};
+  const scopedWorkflowStatuses = workflowStatuses[currentScopeKey] ?? {};
   const selectedCreditCount = activeCreditKeys.filter((key) => selectedCreditsForProject[key]).length;
   const areAllCreditsSelected = Boolean(selectedProjectId) && activeCreditKeys.length > 0 && selectedCreditCount === activeCreditKeys.length;
 
@@ -714,7 +783,12 @@ export default function FeasibilityPage() {
     const manualValue = manualAchievableForProject[creditKey];
     if (typeof manualValue === 'number') return String(clampAchievablePoints(manualValue, availablePoints));
 
-    const reviewStatus = getReviewCreditStatus(getMatchedReviewItem(row));
+    const reviewStatus = getReviewCreditStatus(
+      getMatchedReviewItem(row),
+      certificationPhase,
+      submissionRound,
+      scopedWorkflowStatuses,
+    );
     return reviewStatus === 'checked' ? String(availablePoints) : '0';
   };
 
@@ -726,7 +800,13 @@ export default function FeasibilityPage() {
     if (availablePoints === null) return '';
 
     const achievablePoints = Number(getAchievablePoints(row, rowIndex, sheet));
-    return String(Math.max(0, availablePoints - clampAchievablePoints(achievablePoints, availablePoints)));
+    const doubtfulPoints = Number(getDoubtfulPoints(row, rowIndex, sheet));
+    return String(Math.max(
+      0,
+      availablePoints
+        - clampAchievablePoints(achievablePoints, availablePoints)
+        - clampAchievablePoints(doubtfulPoints, availablePoints),
+    ));
   };
 
   const getDoubtfulPoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
@@ -738,7 +818,15 @@ export default function FeasibilityPage() {
 
     const creditKey = getCreditKey(row);
     const manualValue = manualDoubtfulForProject[creditKey];
-    return typeof manualValue === 'number' ? String(clampAchievablePoints(manualValue, availablePoints)) : '0';
+    if (typeof manualValue === 'number') return String(clampAchievablePoints(manualValue, availablePoints));
+
+    const reviewStatus = getReviewCreditStatus(
+      getMatchedReviewItem(row),
+      certificationPhase,
+      submissionRound,
+      scopedWorkflowStatuses,
+    );
+    return reviewStatus === 'pending' ? String(availablePoints) : '0';
   };
 
   const subtotalRows = useMemo(() => {
@@ -763,7 +851,7 @@ export default function FeasibilityPage() {
           available: activeSectionTotals.available + availablePoints,
           achievable: activeSectionTotals.achievable + achievablePoints,
           doubtful: activeSectionTotals.doubtful + doubtfulPoints,
-          notTargeted: activeSectionTotals.notTargeted + Math.max(0, availablePoints - achievablePoints),
+          notTargeted: activeSectionTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
         };
         return;
       }
@@ -775,10 +863,18 @@ export default function FeasibilityPage() {
     });
 
     return rows;
-  }, [activeSheet, manualAchievableForProject, manualDoubtfulForProject, reviewItemsByCreditKey]);
+  }, [
+    activeSheet,
+    certificationPhase,
+    manualAchievableForProject,
+    manualDoubtfulForProject,
+    reviewItemsByCreditKey,
+    scopedWorkflowStatuses,
+    submissionRound,
+  ]);
 
   const summary = useMemo(() => {
-    if (!activeSheet) return { available: 0, achievable: 0, notTargeted: 0, selected: 0 };
+    if (!activeSheet) return { available: 0, achievable: 0, doubtful: 0, notTargeted: 0, selected: 0 };
 
     const totals = activeSheet.rows.reduce((nextTotals, row, rowIndex) => {
       if (!isCreditRow(row, rowIndex) || isRequiredRow(row, activeSheet)) return nextTotals;
@@ -787,33 +883,46 @@ export default function FeasibilityPage() {
       if (availablePoints === null) return nextTotals;
 
       const achievablePoints = clampAchievablePoints(Number(getAchievablePoints(row, rowIndex, activeSheet)), availablePoints);
+      const doubtfulPoints = clampAchievablePoints(Number(getDoubtfulPoints(row, rowIndex, activeSheet)), availablePoints);
       return {
         available: nextTotals.available + availablePoints,
         achievable: nextTotals.achievable + achievablePoints,
-        notTargeted: nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints),
+        doubtful: nextTotals.doubtful + doubtfulPoints,
+        notTargeted: nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
         selected: nextTotals.selected + (selectedCreditsForProject[getCreditKey(row)] ? 1 : 0),
       };
-    }, { available: 0, achievable: 0, notTargeted: 0, selected: 0 });
+    }, { available: 0, achievable: 0, doubtful: 0, notTargeted: 0, selected: 0 });
 
     const cappedAvailable = Math.min(100, totals.available);
     const cappedAchievable = Math.min(cappedAvailable, totals.achievable);
+    const cappedDoubtful = Math.min(cappedAvailable - cappedAchievable, totals.doubtful);
     return {
       ...totals,
       available: cappedAvailable,
       achievable: cappedAchievable,
-      notTargeted: Math.max(0, cappedAvailable - cappedAchievable),
+      doubtful: cappedDoubtful,
+      notTargeted: Math.max(0, cappedAvailable - cappedAchievable - cappedDoubtful),
     };
-  }, [activeSheet, manualAchievableForProject, reviewItemsByCreditKey, selectedCreditsForProject]);
+  }, [
+    activeSheet,
+    certificationPhase,
+    manualAchievableForProject,
+    manualDoubtfulForProject,
+    reviewItemsByCreditKey,
+    scopedWorkflowStatuses,
+    selectedCreditsForProject,
+    submissionRound,
+  ]);
 
   const toggleAllCredits = () => {
     if (activeCreditKeys.length === 0 || !selectedProjectId) return;
     setSelectedCredits((current) => {
       const nextProjects = { ...(current[checklistType] ?? {}) };
-      const nextForProject = { ...(nextProjects[selectedProjectId] ?? {}) };
+      const nextForProject = { ...(nextProjects[currentScopeKey] ?? {}) };
       activeCreditKeys.forEach((key) => {
         nextForProject[key] = !areAllCreditsSelected;
       });
-      return { ...current, [checklistType]: { ...nextProjects, [selectedProjectId]: nextForProject } };
+      return { ...current, [checklistType]: { ...nextProjects, [currentScopeKey]: nextForProject } };
     });
   };
 
@@ -826,9 +935,9 @@ export default function FeasibilityPage() {
     const nextValue = clampAchievablePoints(Number(value), availablePoints);
     setManualAchievable((current) => {
       const nextType = { ...(current[checklistType] ?? {}) };
-      const nextProject = { ...(nextType[selectedProjectId] ?? {}) };
+      const nextProject = { ...(nextType[currentScopeKey] ?? {}) };
       nextProject[creditKey] = nextValue;
-      return { ...current, [checklistType]: { ...nextType, [selectedProjectId]: nextProject } };
+      return { ...current, [checklistType]: { ...nextType, [currentScopeKey]: nextProject } };
     });
   };
 
@@ -841,9 +950,9 @@ export default function FeasibilityPage() {
     const nextValue = clampAchievablePoints(Number(value), availablePoints);
     setManualDoubtful((current) => {
       const nextType = { ...(current[checklistType] ?? {}) };
-      const nextProject = { ...(nextType[selectedProjectId] ?? {}) };
+      const nextProject = { ...(nextType[currentScopeKey] ?? {}) };
       nextProject[creditKey] = nextValue;
-      return { ...current, [checklistType]: { ...nextType, [selectedProjectId]: nextProject } };
+      return { ...current, [checklistType]: { ...nextType, [currentScopeKey]: nextProject } };
     });
   };
 
@@ -884,6 +993,42 @@ export default function FeasibilityPage() {
       const rows = Array.isArray(payload?.data) ? payload.data as string[][] : [];
       const mapped = parseReviewResponseRows(rows);
       if (!currentScopeKey) return;
+
+      const pendingCreditKeys = Object.entries(mapped)
+        .filter(([, responseCell]) => responseCell.pending.some((value) => Number(value) > 0))
+        .map(([creditKey]) => creditKey);
+      let autoSelectedCreditKeys: string[] = [];
+      if (pendingCreditKeys.length > 0) {
+        const secondSubmissionScopeKey = getCertificationScopeKey(
+          selectedProjectId,
+          checklistType,
+          certificationPhase,
+          'second',
+        );
+        const storageKey = getSelectedCreditsScopeStorageKey(secondSubmissionScopeKey);
+        let storedSelection: Record<string, boolean> = {};
+        try {
+          const stored = window.localStorage.getItem(storageKey);
+          storedSelection = stored ? JSON.parse(stored) as Record<string, boolean> : {};
+        } catch {
+          window.localStorage.removeItem(storageKey);
+        }
+        autoSelectedCreditKeys = pendingCreditKeys.filter((creditKey) => !storedSelection[creditKey]);
+        const nextSelection = { ...storedSelection };
+        pendingCreditKeys.forEach((creditKey) => {
+          nextSelection[creditKey] = true;
+        });
+        window.localStorage.setItem(storageKey, JSON.stringify(nextSelection));
+        setSelectedCredits((current) => ({
+          ...current,
+          [checklistType]: {
+            ...(current[checklistType] ?? {}),
+            [secondSubmissionScopeKey]: nextSelection,
+          },
+        }));
+        window.dispatchEvent(new CustomEvent(feasibilitySelectionChangeEvent));
+      }
+
       setReviewResponses((current) => ({
         ...current,
         [currentScopeKey]: {
@@ -891,8 +1036,10 @@ export default function FeasibilityPage() {
           parsedRows: rows,
           mappedResponses: mapped,
           uploadedAt: new Date().toISOString(),
+          autoSelectedCreditKeys,
         },
       }));
+
       setUploadMessage(Object.keys(mapped).length > 0
         ? `Review response uploaded: ${file.name}. ${Object.keys(mapped).length} matched rows found.`
         : 'Review response uploaded, but no Expected/Pending/Denied data was found.');
@@ -902,13 +1049,63 @@ export default function FeasibilityPage() {
   };
 
   const deleteUploadedReviewResponse = () => {
-    if (!currentScopeKey) return;
+    if (!currentReviewResponseScopeKey || !currentReviewResponse) return;
+    const pendingCreditKeys = Object.entries(currentReviewResponse.mappedResponses)
+      .filter(([, responseCell]) => responseCell.pending.some((value) => Number(value) > 0))
+      .map(([creditKey]) => creditKey);
+    const autoSelectedCreditKeys = currentReviewResponse.autoSelectedCreditKeys ?? pendingCreditKeys;
+    const secondSubmissionScopeKey = getCertificationScopeKey(
+      selectedProjectId,
+      checklistType,
+      certificationPhase,
+      'second',
+    );
+
+    if (autoSelectedCreditKeys.length > 0) {
+      const storageKey = getSelectedCreditsScopeStorageKey(secondSubmissionScopeKey);
+      let storedSelection: Record<string, boolean> = {};
+      try {
+        const stored = window.localStorage.getItem(storageKey);
+        storedSelection = stored ? JSON.parse(stored) as Record<string, boolean> : {};
+      } catch {
+        window.localStorage.removeItem(storageKey);
+      }
+      const nextSelection = { ...storedSelection };
+      autoSelectedCreditKeys.forEach((creditKey) => {
+        delete nextSelection[creditKey];
+      });
+      window.localStorage.setItem(storageKey, JSON.stringify(nextSelection));
+      setSelectedCredits((current) => ({
+        ...current,
+        [checklistType]: {
+          ...(current[checklistType] ?? {}),
+          [secondSubmissionScopeKey]: nextSelection,
+        },
+      }));
+
+      const requirementIds = new Set<string>();
+      autoSelectedCreditKeys.forEach((creditKey) => {
+        const matchedItem = reviewItemsByCreditKey.get(creditKey)
+          ?? Array.from(reviewItemsByCreditKey.entries())
+            .find(([itemKey]) => itemKey === creditKey || itemKey.endsWith(creditKey) || creditKey.endsWith(itemKey))?.[1];
+        const requirements = certificationPhase === 'pre'
+          ? matchedItem?.preRequirements
+          : matchedItem?.finalRequirements;
+        requirements?.forEach((requirement) => requirementIds.add(requirement.id));
+      });
+      updateChecklistStatusesForScope(
+        secondSubmissionScopeKey,
+        Object.fromEntries(Array.from(requirementIds).map((requirementId) => [requirementId, 'pending'])),
+      );
+      window.dispatchEvent(new CustomEvent(feasibilitySelectionChangeEvent));
+    }
+
     setReviewResponses((current) => {
       const next = { ...current };
-      delete next[currentScopeKey];
+      delete next[currentReviewResponseScopeKey];
       return next;
     });
-    window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentScopeKey));
+    window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentReviewResponseScopeKey));
     setReviewFileMenu(null);
     setUploadMessage('Uploaded review response deleted.');
   };
@@ -916,15 +1113,15 @@ export default function FeasibilityPage() {
   return (
     <div className={styles.container} onClick={() => setReviewFileMenu(null)}>
       <section className={`${styles.toolbar} glassmorphism`}>
-        <div className={styles.titleBlock}>
-          <h2>{checklistType.toUpperCase()} Feasibility Checklist</h2>
-          <span>C:\Users\monika.swami\Desktop\Leed Project</span>
-        </div>
-        <div className={styles.topControls}>
+        <div className={`${styles.topControls} ${styles.fullTopControls}`}>
           <select
             className={styles.projectSelect}
             value={selectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
+            onChange={(event) => {
+              setSelectedProjectId(event.target.value);
+              window.localStorage.setItem('certification-filtration-selected-project', event.target.value);
+              window.localStorage.setItem('checklist-review-selected-project', event.target.value);
+            }}
             aria-label="Select feasibility project"
           >
             {projectOptions.length === 0 ? (
@@ -932,6 +1129,24 @@ export default function FeasibilityPage() {
             ) : projectOptions.map((project) => (
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
+          </select>
+          <select
+            className={`${styles.projectSelect} ${styles.workflowSelect}`}
+            value={certificationPhase}
+            onChange={(event) => setCertificationPhase(event.target.value as CertificationPhase)}
+            aria-label="Select certification phase"
+          >
+            <option value="pre">Pre Certification</option>
+            <option value="final">Final Certification</option>
+          </select>
+          <select
+            className={`${styles.projectSelect} ${styles.workflowSelect}`}
+            value={submissionRound}
+            onChange={(event) => setSubmissionRound(event.target.value as SubmissionRound)}
+            aria-label="Select submission round"
+          >
+            <option value="first">First Submission</option>
+            <option value="second">Second Submission</option>
           </select>
           <label className={styles.uploadButton}>
             <Upload size={15} />
@@ -1045,6 +1260,17 @@ export default function FeasibilityPage() {
 
             <div className={styles.tableWrap}>
               <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th
+                      className={styles.feasibilityDataTitle}
+                      colSpan={Math.max(1, ...activeSheet.rows.map((row) => row.length)) + 1}
+                    >
+                      Feasibility Checklist
+                    </th>
+                    <th className={styles.reviewDataTitle} colSpan={3}>Review Data</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {activeSheet.rows.map((row, rowIndex) => {
                     const sectionRow = isSectionRow(row, rowIndex);
@@ -1071,8 +1297,8 @@ export default function FeasibilityPage() {
                                 ...current,
                                 [checklistType]: {
                                   ...(current[checklistType] ?? {}),
-                                  [selectedProjectId]: {
-                                    ...((current[checklistType] ?? {})[selectedProjectId] ?? {}),
+                                  [currentScopeKey]: {
+                                    ...((current[checklistType] ?? {})[currentScopeKey] ?? {}),
                                     [checkKey]: event.target.checked,
                                   },
                                 },
@@ -1144,17 +1370,21 @@ export default function FeasibilityPage() {
                       })}
                       {isColumnHeaderRow ? (
                         <>
-                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Expected</td>
-                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Pending</td>
-                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader}`}>Denied</td>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader} ${styles.expectedHeader}`}>Expected</td>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader} ${styles.pendingHeader}`}>Pending</td>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseHeader} ${styles.deniedHeader}`}>Denied</td>
                         </>
                       ) : isCredit ? (
                         <>
-                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseDivider}`}>
+                          <td className={`${styles.reviewResponseCell} ${styles.reviewResponseDivider} ${response?.expected.length ? styles.expectedResponse : ''}`}>
                             {response ? renderResponseCell(response.expected, '-') : <span className={styles.noResponse}>No response</span>}
                           </td>
-                          <td className={styles.reviewResponseCell}>{response ? renderResponseCell(response.pending) : <span className={styles.noResponse}>-</span>}</td>
-                          <td className={styles.reviewResponseCell}>{response ? renderResponseCell(response.denied) : <span className={styles.noResponse}>-</span>}</td>
+                          <td className={`${styles.reviewResponseCell} ${response?.pending.length ? styles.pendingResponse : ''}`}>
+                            {response ? renderResponseCell(response.pending) : <span className={styles.noResponse}>-</span>}
+                          </td>
+                          <td className={`${styles.reviewResponseCell} ${response?.denied.length ? styles.deniedResponse : ''}`}>
+                            {response ? renderResponseCell(response.denied) : <span className={styles.noResponse}>-</span>}
+                          </td>
                         </>
                       ) : (
                         <>

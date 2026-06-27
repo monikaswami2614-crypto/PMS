@@ -3,6 +3,13 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, FolderClosed, Loader2, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
+import {
+  feasibilitySelectionChangeEvent,
+  getCertificationScopeKey,
+  getSelectedCreditsScopeStorageKey,
+  readChecklistStatuses,
+  updateChecklistStatusesForScope,
+} from '@/utils/certificationWorkflow';
 import ClientMailButton from '@/components/ClientMailButton';
 import styles from '../checklist-review/page.module.css';
 
@@ -145,8 +152,6 @@ const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 const selectedProjectStorageKey = 'certification-filtration-selected-project';
 const selectedProjectChangeEvent = 'certification-filtration-project-change';
 const workflowFilesStoragePrefix = 'certification-filtration-workflow-files';
-const selectedFeasibilityCreditsStorageKey = 'pms-feasibility-selected-credit-keys-by-project';
-const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 
 const subscribeToSelectedProject = (onStoreChange: () => void) => {
   window.addEventListener('storage', onStoreChange);
@@ -224,13 +229,17 @@ export default function CertificationFiltrationPage() {
   const [manuallyCheckedRequirementIds, setManuallyCheckedRequirementIds] = useState<Record<string, boolean>>({});
   const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
   const [hydratedWorkflowKey, setHydratedWorkflowKey] = useState('');
-  const [selectedFeasibilityCredits, setSelectedFeasibilityCredits] = useState<Record<'nb' | 'gh', Record<string, Record<string, boolean>>>>({ nb: {}, gh: {} });
+  const [selectedFeasibilityCredits, setSelectedFeasibilityCredits] = useState<Record<string, boolean>>({});
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
     : reviewProjects[0]?.id || '';
   const selectedProject = reviewProjects.find((project) => project.id === effectiveSelectedProjectId);
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
+  const filtrationChecklistType = (filtrationData?.project.type === 'GH' || inferredType === 'GREEN_HOMES') ? 'gh' : 'nb';
+  const certificationScopeKey = effectiveSelectedProjectId
+    ? getCertificationScopeKey(effectiveSelectedProjectId, filtrationChecklistType, phase, submissionMode)
+    : '';
   const workflowFilesStorageKey = effectiveSelectedProjectId
     ? `${workflowFilesStoragePrefix}:${effectiveSelectedProjectId}:${phase}:${submissionMode}`
     : '';
@@ -261,15 +270,17 @@ export default function CertificationFiltrationPage() {
 
   useEffect(() => {
     const loadSelectedFeasibilityCredits = () => {
+      if (!certificationScopeKey) {
+        setSelectedFeasibilityCredits({});
+        return;
+      }
       try {
-        const storedSelection = window.localStorage.getItem(selectedFeasibilityCreditsStorageKey);
-        const parsed = storedSelection
-          ? JSON.parse(storedSelection) as Partial<Record<'nb' | 'gh', Record<string, Record<string, boolean>>>>
-          : null;
-        setSelectedFeasibilityCredits({ nb: parsed?.nb ?? {}, gh: parsed?.gh ?? {} });
+        const storageKey = getSelectedCreditsScopeStorageKey(certificationScopeKey);
+        const storedSelection = window.localStorage.getItem(storageKey);
+        setSelectedFeasibilityCredits(storedSelection ? JSON.parse(storedSelection) as Record<string, boolean> : {});
       } catch {
-        window.localStorage.removeItem(selectedFeasibilityCreditsStorageKey);
-        setSelectedFeasibilityCredits({ nb: {}, gh: {} });
+        window.localStorage.removeItem(getSelectedCreditsScopeStorageKey(certificationScopeKey));
+        setSelectedFeasibilityCredits({});
       }
     };
 
@@ -280,7 +291,7 @@ export default function CertificationFiltrationPage() {
       window.removeEventListener('storage', loadSelectedFeasibilityCredits);
       window.removeEventListener(feasibilitySelectionChangeEvent, loadSelectedFeasibilityCredits);
     };
-  }, []);
+  }, [certificationScopeKey]);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) {
@@ -605,14 +616,10 @@ export default function CertificationFiltrationPage() {
   const visibleGroups = (() => {
     const query = creditSearch.trim().toLowerCase();
     const groups = filtrationData?.groups ?? [];
-    const checklistType = (filtrationData?.project.type === 'GH' || inferredType === 'GREEN_HOMES') ? 'gh' : 'nb';
-    const selectedCreditKeys = selectedFeasibilityCredits[checklistType]?.[effectiveSelectedProjectId] ?? {};
-    const activeSelectedCreditKeys = Object.entries(selectedCreditKeys)
+    const activeSelectedCreditKeys = Object.entries(selectedFeasibilityCredits)
       .filter(([, selected]) => selected)
       .map(([key]) => key);
-    const feasibilityFilteredGroups = activeSelectedCreditKeys.length === 0
-      ? groups
-      : groups.filter((group) => {
+    const feasibilityFilteredGroups = groups.filter((group) => {
         const groupCreditKey = normalizeCreditKey(group.creditName);
         return activeSelectedCreditKeys.some((selectedKey) => groupCreditKey === selectedKey || groupCreditKey.endsWith(selectedKey));
       });
@@ -693,7 +700,7 @@ export default function CertificationFiltrationPage() {
     const searchablePath = `${file.relativePath} ${file.path}`.toLowerCase();
     const isFirstSubmission = /(^|[^a-z0-9])(1st|first|1\s*submission)/.test(searchablePath);
     const isSecondSubmission = /(^|[^a-z0-9])(2nd|second|2\s*submission)/.test(searchablePath);
-    if (submissionMode === 'second') return isFirstSubmission || isSecondSubmission;
+    if (submissionMode === 'second') return isSecondSubmission;
     return isFirstSubmission;
   };
 
@@ -709,7 +716,7 @@ export default function CertificationFiltrationPage() {
           return filesById;
         }, new Map<string, SheetFile>())
         .values()
-    )
+    ).filter(matchesSubmissionMode)
   );
 
   const getSupportingFiles = (group: FiltrationGroup): SheetFile[] => {
@@ -836,6 +843,49 @@ export default function CertificationFiltrationPage() {
     return 'missing';
   };
 
+  useEffect(() => {
+    if (!certificationScopeKey || !filtrationData) return;
+
+    const currentStatuses = readChecklistStatuses()[certificationScopeKey] ?? {};
+    const selectedCreditKeys = Object.entries(selectedFeasibilityCredits)
+      .filter(([, selected]) => selected)
+      .map(([creditKey]) => creditKey);
+    const selectedGroups = filtrationData.groups.filter((group) => {
+      const groupCreditKey = normalizeCreditKey(group.creditName);
+      return selectedCreditKeys.some((selectedKey) => (
+        groupCreditKey === selectedKey || groupCreditKey.endsWith(selectedKey)
+      ));
+    });
+    const updates = Object.fromEntries(selectedGroups.flatMap((group) => {
+      const workflowMatchedFiles = uniqueFilesByFileId([
+        ...getSubmissionFiles(group),
+        ...getSupportingFiles(group),
+        ...getGroupFiles(group),
+        ...clientFiltrationFiles.filter((file) => file.creditName === group.creditName && file.subCreditName === group.subCreditName),
+        ...aiMatchedClientFiles.filter((file) => file.creditName === group.creditName && file.subCreditName === group.subCreditName),
+      ]);
+      return group.requirements.map((requirement) => {
+        if (currentStatuses[requirement.id] === 'overridden') {
+          return [requirement.id, 'overridden'] as const;
+        }
+        return [
+          requirement.id,
+          isRequirementSatisfied(requirement, workflowMatchedFiles) ? 'checked' : 'missing',
+        ] as const;
+      });
+    }));
+
+    updateChecklistStatusesForScope(certificationScopeKey, updates);
+  }, [
+    aiMatchedClientFiles,
+    certificationScopeKey,
+    clientFiltrationFiles,
+    filtrationData,
+    finalFiles,
+    selectedFeasibilityCredits,
+    supportingFiles,
+  ]);
+
   const updateManualRequirementOverride = async (
     requirement: FiltrationRequirement,
     selectionKey: string,
@@ -846,12 +896,17 @@ export default function CertificationFiltrationPage() {
       : requirement.status === 'overridden';
 
     setManuallyCheckedRequirementIds((current) => ({ ...current, [selectionKey]: checked }));
+    const nextStatus: RequirementStatus = checked ? 'overridden' : 'missing';
+    if (certificationScopeKey) {
+      updateChecklistStatusesForScope(certificationScopeKey, { [requirement.id]: nextStatus });
+    }
 
     try {
+      if (submissionMode === 'second') return;
       const response = await fetch(`${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/items/${requirement.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase, status: checked ? 'overridden' : 'missing' }),
+        body: JSON.stringify({ phase, status: nextStatus }),
       });
 
       if (!response.ok) {
@@ -1440,6 +1495,7 @@ export default function CertificationFiltrationPage() {
               value={effectiveSelectedProjectId}
               onChange={(event) => {
                 window.localStorage.setItem(selectedProjectStorageKey, event.target.value);
+                window.localStorage.setItem('checklist-review-selected-project', event.target.value);
                 window.dispatchEvent(new Event(selectedProjectChangeEvent));
               }}
               className={styles.projectSelect}

@@ -4,6 +4,15 @@ import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react
 import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import { logClientActivity } from '@/utils/activityLog';
+import {
+  ChecklistStatusesByScope,
+  checklistStatusChangeEvent,
+  feasibilitySelectionChangeEvent,
+  getCertificationScopeKey,
+  getSelectedCreditsScopeStorageKey,
+  readChecklistStatuses,
+  updateChecklistStatusesForScope,
+} from '@/utils/certificationWorkflow';
 import ClientMailButton from '@/components/ClientMailButton';
 import styles from './page.module.css';
 
@@ -105,7 +114,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 const selectedProjectStorageKey = 'checklist-review-selected-project';
 const selectedProjectChangeEvent = 'checklist-review-project-change';
 const reviewCycleStorageKey = 'checklist-review-selected-cycle';
-const secondSubmissionStatusesStorageKey = 'checklist-review-second-submission-statuses';
+const legacySecondSubmissionStatusesStorageKey = 'checklist-review-second-submission-statuses';
 
 const subscribeToSelectedProject = (onStoreChange: () => void) => {
   window.addEventListener('storage', onStoreChange);
@@ -191,7 +200,8 @@ export default function ChecklistReviewPage() {
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenu | null>(null);
   const [activeFileInfo, setActiveFileInfo] = useState<SheetFile | null>(null);
   const [reviewCycle, setReviewCycle] = useState<FiltrationPhase>('pre');
-  const [secondSubmissionStatuses, setSecondSubmissionStatuses] = useState<Record<string, RequirementStatus>>({});
+  const [workflowStatuses, setWorkflowStatuses] = useState<ChecklistStatusesByScope>({});
+  const [visibleFeasibilityCredits, setVisibleFeasibilityCredits] = useState<Record<string, boolean>>({});
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -201,13 +211,14 @@ export default function ChecklistReviewPage() {
     const storedCycle = window.localStorage.getItem(reviewCycleStorageKey);
     if (storedCycle === 'pre' || storedCycle === 'final') setReviewCycle(storedCycle);
 
-    try {
-      const storedStatuses = window.localStorage.getItem(secondSubmissionStatusesStorageKey);
-      setSecondSubmissionStatuses(storedStatuses ? JSON.parse(storedStatuses) as Record<string, RequirementStatus> : {});
-    } catch {
-      window.localStorage.removeItem(secondSubmissionStatusesStorageKey);
-      setSecondSubmissionStatuses({});
-    }
+    const loadWorkflowStatuses = () => setWorkflowStatuses(readChecklistStatuses());
+    loadWorkflowStatuses();
+    window.addEventListener('storage', loadWorkflowStatuses);
+    window.addEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+    return () => {
+      window.removeEventListener('storage', loadWorkflowStatuses);
+      window.removeEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+    };
   }, []);
 
   useEffect(() => {
@@ -215,8 +226,30 @@ export default function ChecklistReviewPage() {
   }, [reviewCycle]);
 
   useEffect(() => {
-    window.localStorage.setItem(secondSubmissionStatusesStorageKey, JSON.stringify(secondSubmissionStatuses));
-  }, [secondSubmissionStatuses]);
+    if (!review) return;
+    try {
+      const stored = window.localStorage.getItem(legacySecondSubmissionStatusesStorageKey);
+      if (!stored) return;
+      const legacyStatuses = JSON.parse(stored) as Record<string, RequirementStatus>;
+      const checklistType = review.project.type.toLowerCase() as 'nb' | 'gh';
+
+      (['pre', 'final'] as FiltrationPhase[]).forEach((phase) => {
+        const prefix = `${review.project.id}:${phase}:`;
+        const updates = Object.fromEntries(Object.entries(legacyStatuses)
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, status]) => [key.slice(prefix.length), status]));
+        if (Object.keys(updates).length > 0) {
+          updateChecklistStatusesForScope(
+            getCertificationScopeKey(review.project.id, checklistType, phase, 'second'),
+            updates,
+          );
+        }
+      });
+      window.localStorage.removeItem(legacySecondSubmissionStatusesStorageKey);
+    } catch {
+      window.localStorage.removeItem(legacySecondSubmissionStatusesStorageKey);
+    }
+  }, [review]);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) return;
@@ -256,6 +289,74 @@ export default function ChecklistReviewPage() {
 
   const selectedProject = reviewProjects.find((project) => project.id === effectiveSelectedProjectId);
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
+  const reviewChecklistType = (review?.project.type === 'GH' || inferredType === 'GREEN_HOMES') ? 'gh' : 'nb';
+
+  useEffect(() => {
+    const loadVisibleFeasibilityCredits = () => {
+      if (!effectiveSelectedProjectId) {
+        setVisibleFeasibilityCredits({});
+        return;
+      }
+
+      const selections: Record<string, boolean> = {};
+      (['first', 'second'] as const).forEach((submissionRound) => {
+        const scopeKey = getCertificationScopeKey(
+          effectiveSelectedProjectId,
+          reviewChecklistType,
+          reviewCycle,
+          submissionRound,
+        );
+        try {
+          const stored = window.localStorage.getItem(getSelectedCreditsScopeStorageKey(scopeKey));
+          const parsed = stored ? JSON.parse(stored) as Record<string, boolean> : {};
+          Object.entries(parsed).forEach(([creditKey, selected]) => {
+            if (selected) selections[creditKey] = true;
+          });
+        } catch {
+          window.localStorage.removeItem(getSelectedCreditsScopeStorageKey(scopeKey));
+        }
+      });
+      setVisibleFeasibilityCredits(selections);
+    };
+
+    loadVisibleFeasibilityCredits();
+    window.addEventListener('storage', loadVisibleFeasibilityCredits);
+    window.addEventListener(feasibilitySelectionChangeEvent, loadVisibleFeasibilityCredits);
+    return () => {
+      window.removeEventListener('storage', loadVisibleFeasibilityCredits);
+      window.removeEventListener(feasibilitySelectionChangeEvent, loadVisibleFeasibilityCredits);
+    };
+  }, [effectiveSelectedProjectId, reviewChecklistType, reviewCycle]);
+
+  const visibleReviewItems = useMemo(() => {
+    const selectedKeys = Object.keys(visibleFeasibilityCredits);
+    if (selectedKeys.length === 0) return [];
+
+    const normalizeCreditKey = (value: string): string => (
+      (value
+        .toLowerCase()
+        .replace(/\bmandatory\s+requirements?\b/g, 'mr')
+        .replace(/\bcredits?\b/g, 'cr')
+        .match(/[a-z]+|\d+/g) ?? [])
+        .map((token) => {
+          if (token === 'rwh') return 'rhw';
+          if (token === 'mandatory' || token === 'requirement' || token === 'requirements') return 'mr';
+          return token;
+        })
+        .join('')
+    );
+
+    return (review?.items ?? []).filter((item) => {
+      const itemKeys = [
+        normalizeCreditKey(item.creditName),
+        normalizeCreditKey(`${item.creditName} ${item.subCreditName}`),
+      ];
+      return selectedKeys.some((selectedKey) => (
+        itemKeys.some((itemKey) => itemKey === selectedKey || itemKey.endsWith(selectedKey) || selectedKey.endsWith(itemKey))
+      ));
+    });
+  }, [review, visibleFeasibilityCredits]);
+
   const preRequirements = review?.items.flatMap((item) => item.preRequirements) ?? [];
   const finalRequirements = review?.items.flatMap((item) => item.finalRequirements) ?? [];
   const completedPre = preRequirements.filter((requirement) => requirement.status === 'checked' || requirement.status === 'overridden').length;
@@ -348,6 +449,9 @@ export default function ChecklistReviewPage() {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || 'Failed to save checklist status');
       }
+      const checklistType = review.project.type.toLowerCase() as 'nb' | 'gh';
+      const scopeKey = getCertificationScopeKey(review.project.id, checklistType, phase, 'first');
+      setWorkflowStatuses(updateChecklistStatusesForScope(scopeKey, { [requirementId]: status }));
       logChecklistActivity(
         'Checklist status updated',
         `${phase === 'pre' ? 'Pre' : 'Final'} certification requirement status changed from ${previousRequirement?.status || 'unknown'} to ${status}.`,
@@ -696,8 +800,13 @@ export default function ChecklistReviewPage() {
     );
   };
 
-  const getSecondSubmissionStatusKey = (requirementId: string, phase: FiltrationPhase) => (
-    `${effectiveSelectedProjectId}:${phase}:${requirementId}`
+  const getReviewScopeKey = (phase: FiltrationPhase, submission: SubmissionNumber) => (
+    getCertificationScopeKey(
+      effectiveSelectedProjectId,
+      (review?.project.type.toLowerCase() ?? (inferredType === 'GREEN_HOMES' ? 'gh' : 'nb')) as 'nb' | 'gh',
+      phase,
+      submission === 1 ? 'first' : 'second',
+    )
   );
 
   const getSubmissionStatus = (
@@ -705,9 +814,8 @@ export default function ChecklistReviewPage() {
     phase: FiltrationPhase,
     submission: SubmissionNumber,
   ): RequirementStatus => (
-    submission === 1
-      ? requirement.status
-      : secondSubmissionStatuses[getSecondSubmissionStatusKey(requirement.id, phase)] ?? 'pending'
+    workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
+      ?? (submission === 1 ? requirement.status : 'pending')
   );
 
   const updateSecondSubmissionStatus = (
@@ -715,8 +823,8 @@ export default function ChecklistReviewPage() {
     phase: FiltrationPhase,
     status: RequirementStatus,
   ) => {
-    const key = getSecondSubmissionStatusKey(requirementId, phase);
-    setSecondSubmissionStatuses((current) => ({ ...current, [key]: status }));
+    const scopeKey = getReviewScopeKey(phase, 2);
+    setWorkflowStatuses(updateChecklistStatusesForScope(scopeKey, { [requirementId]: status }));
     logChecklistActivity(
       'Second submission status updated',
       `${phase === 'pre' ? 'Pre' : 'Final'} second submission requirement status changed to ${status}.`,
@@ -919,6 +1027,7 @@ export default function ChecklistReviewPage() {
             value={effectiveSelectedProjectId}
             onChange={(event) => {
               window.localStorage.setItem(selectedProjectStorageKey, event.target.value);
+              window.localStorage.setItem('certification-filtration-selected-project', event.target.value);
               window.dispatchEvent(new Event(selectedProjectChangeEvent));
             }}
             className={styles.projectSelect}
@@ -963,7 +1072,7 @@ export default function ChecklistReviewPage() {
             <Loader2 size={28} className={styles.loadingIcon} />
             <span>Loading checklist review</span>
           </div>
-        ) : review && review.items.length > 0 ? (
+        ) : review && visibleReviewItems.length > 0 ? (
           <div className={styles.tableWrapper}>
             <table className={styles.table}>
               <thead>
@@ -974,7 +1083,7 @@ export default function ChecklistReviewPage() {
                 </tr>
               </thead>
               <tbody>
-                {review.items.map((item) => {
+                {visibleReviewItems.map((item) => {
                   const requirements = reviewCycle === 'pre' ? item.preRequirements : item.finalRequirements;
                   return (
                     <tr key={item.id}>
