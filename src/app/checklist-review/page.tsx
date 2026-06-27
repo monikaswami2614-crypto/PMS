@@ -52,6 +52,7 @@ type ActiveRequirement = {
 };
 
 type FiltrationPhase = 'pre' | 'final';
+type SubmissionNumber = 1 | 2;
 
 type FiltrationFile = MatchedFile & {
   extension?: string | null;
@@ -103,6 +104,8 @@ type FileContextMenu = {
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 const selectedProjectStorageKey = 'checklist-review-selected-project';
 const selectedProjectChangeEvent = 'checklist-review-project-change';
+const reviewCycleStorageKey = 'checklist-review-selected-cycle';
+const secondSubmissionStatusesStorageKey = 'checklist-review-second-submission-statuses';
 
 const subscribeToSelectedProject = (onStoreChange: () => void) => {
   window.addEventListener('storage', onStoreChange);
@@ -187,10 +190,33 @@ export default function ChecklistReviewPage() {
   const [hiddenFiltrationFiles, setHiddenFiltrationFiles] = useState<Record<string, boolean>>({});
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenu | null>(null);
   const [activeFileInfo, setActiveFileInfo] = useState<SheetFile | null>(null);
+  const [reviewCycle, setReviewCycle] = useState<FiltrationPhase>('pre');
+  const [secondSubmissionStatuses, setSecondSubmissionStatuses] = useState<Record<string, RequirementStatus>>({});
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
     : reviewProjects[0]?.id || '';
+
+  useEffect(() => {
+    const storedCycle = window.localStorage.getItem(reviewCycleStorageKey);
+    if (storedCycle === 'pre' || storedCycle === 'final') setReviewCycle(storedCycle);
+
+    try {
+      const storedStatuses = window.localStorage.getItem(secondSubmissionStatusesStorageKey);
+      setSecondSubmissionStatuses(storedStatuses ? JSON.parse(storedStatuses) as Record<string, RequirementStatus> : {});
+    } catch {
+      window.localStorage.removeItem(secondSubmissionStatusesStorageKey);
+      setSecondSubmissionStatuses({});
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(reviewCycleStorageKey, reviewCycle);
+  }, [reviewCycle]);
+
+  useEffect(() => {
+    window.localStorage.setItem(secondSubmissionStatusesStorageKey, JSON.stringify(secondSubmissionStatuses));
+  }, [secondSubmissionStatuses]);
 
   useEffect(() => {
     if (!effectiveSelectedProjectId) return;
@@ -670,17 +696,60 @@ export default function ChecklistReviewPage() {
     );
   };
 
-  const renderStatusSelect = (requirement: RequirementPoint, phase: 'pre' | 'final') => {
-    const saving = savingKey === `${requirement.id}-${phase}`;
+  const getSecondSubmissionStatusKey = (requirementId: string, phase: FiltrationPhase) => (
+    `${effectiveSelectedProjectId}:${phase}:${requirementId}`
+  );
+
+  const getSubmissionStatus = (
+    requirement: RequirementPoint,
+    phase: FiltrationPhase,
+    submission: SubmissionNumber,
+  ): RequirementStatus => (
+    submission === 1
+      ? requirement.status
+      : secondSubmissionStatuses[getSecondSubmissionStatusKey(requirement.id, phase)] ?? 'pending'
+  );
+
+  const updateSecondSubmissionStatus = (
+    requirementId: string,
+    phase: FiltrationPhase,
+    status: RequirementStatus,
+  ) => {
+    const key = getSecondSubmissionStatusKey(requirementId, phase);
+    setSecondSubmissionStatuses((current) => ({ ...current, [key]: status }));
+    logChecklistActivity(
+      'Second submission status updated',
+      `${phase === 'pre' ? 'Pre' : 'Final'} second submission requirement status changed to ${status}.`,
+      {
+        newValue: { requirementId, phase, submission: 2, status },
+        metadata: { phase, submission: 2 },
+      },
+    );
+  };
+
+  const renderStatusSelect = (
+    requirement: RequirementPoint,
+    phase: FiltrationPhase,
+    submission: SubmissionNumber,
+  ) => {
+    const status = getSubmissionStatus(requirement, phase, submission);
+    const saving = submission === 1 && savingKey === `${requirement.id}-${phase}`;
 
     return (
       <div className={styles.statusControl}>
         <select
-          value={requirement.status}
-          onChange={(event) => updateRequirementStatus(requirement.id, phase, event.target.value as RequirementStatus)}
-          className={`${styles.statusSelect} ${styles[`status-${requirement.status}`]}`}
+          value={status}
+          onChange={(event) => {
+            const nextStatus = event.target.value as RequirementStatus;
+            if (submission === 1) {
+              void updateRequirementStatus(requirement.id, phase, nextStatus);
+            } else {
+              updateSecondSubmissionStatus(requirement.id, phase, nextStatus);
+            }
+          }}
+          className={`${styles.statusSelect} ${styles[`status-${status}`]}`}
           disabled={saving}
-          aria-label={`${phase === 'pre' ? 'Pre' : 'Final'} requirement status`}
+          aria-label={`${phase === 'pre' ? 'Pre' : 'Final'} submission ${submission} requirement status`}
         >
           {statusOptions.map((option) => (
             <option key={option} value={option}>
@@ -693,23 +762,31 @@ export default function ChecklistReviewPage() {
     );
   };
 
-  const renderRequirements = (requirements: RequirementPoint[], phase: 'pre' | 'final') => {
+  const renderRequirements = (
+    requirements: RequirementPoint[],
+    phase: FiltrationPhase,
+    submission: SubmissionNumber,
+  ) => {
     if (requirements.length === 0) return <span className={styles.emptyRequirement}>-</span>;
 
     return (
       <div className={styles.requirementList}>
-        {requirements.map((requirement) => (
-          <div key={requirement.id} className={`${styles.requirementPoint} ${styles[`point-${requirement.status}`]}`}>
+        {requirements.map((requirement) => {
+          const status = getSubmissionStatus(requirement, phase, submission);
+          const displayedRequirement = { ...requirement, status };
+          return (
+          <div key={requirement.id} className={`${styles.requirementPoint} ${styles[`point-${status}`]}`}>
             <button
               type="button"
               className={styles.requirementTextButton}
-              onClick={() => setActiveRequirement({ requirement, phase })}
+              onClick={() => setActiveRequirement({ requirement: displayedRequirement, phase })}
             >
               {requirement.text}
             </button>
-            {renderStatusSelect(requirement, phase)}
+            {renderStatusSelect(requirement, phase, submission)}
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -855,6 +932,16 @@ export default function ChecklistReviewPage() {
           </select>
         </div>
 
+        <select
+          value={reviewCycle}
+          onChange={(event) => setReviewCycle(event.target.value as FiltrationPhase)}
+          className={styles.submissionSelect}
+          aria-label="Select checklist submission cycle"
+        >
+          <option value="pre">Pre Submission</option>
+          <option value="final">Final Submission</option>
+        </select>
+
         <div className={styles.summaryGroup}>
           <ClientMailButton
             projectId={effectiveSelectedProjectId}
@@ -881,21 +968,24 @@ export default function ChecklistReviewPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Credit Name</th>
-                  <th>Pre Certification</th>
-                  <th>Final Certification</th>
+                  <th>Credit</th>
+                  <th>1st Submission</th>
+                  <th>2nd Submission</th>
                 </tr>
               </thead>
               <tbody>
-                {review.items.map((item) => (
-                  <tr key={item.id}>
-                    <td className={styles.creditCell}>
-                      <div>{item.creditName || '-'}</div>
-                    </td>
-                    <td>{renderRequirements(item.preRequirements, 'pre')}</td>
-                    <td>{renderRequirements(item.finalRequirements, 'final')}</td>
-                  </tr>
-                ))}
+                {review.items.map((item) => {
+                  const requirements = reviewCycle === 'pre' ? item.preRequirements : item.finalRequirements;
+                  return (
+                    <tr key={item.id}>
+                      <td className={styles.creditCell}>
+                        <div>{item.creditName || '-'}</div>
+                      </td>
+                      <td>{renderRequirements(requirements, reviewCycle, 1)}</td>
+                      <td>{renderRequirements(requirements, reviewCycle, 2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

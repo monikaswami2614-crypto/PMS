@@ -55,6 +55,33 @@
   color: var(--text-primary);
 }
 
+.submissionSelect {
+  min-width: 190px;
+  min-height: 40px;
+  padding: 9px 36px 9px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml;utf8,<svg fill='gray' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 700;
+  outline: none;
+  appearance: none;
+}
+
+.submissionSelect:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.12);
+}
+
+.submissionSelect option {
+  background: var(--dropdown-bg);
+  color: var(--text-primary);
+}
+
 .summaryGroup {
   display: flex;
   align-items: center;
@@ -1680,6 +1707,10 @@
   .selectorGroup {
     min-width: 100%;
     max-width: none;
+  }
+
+  .submissionSelect {
+    width: 100%;
   }
 
   .summaryGroup {
