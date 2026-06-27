@@ -47,7 +47,14 @@ type UploadedResponseCell = {
   denied: string[];
 };
 
-type UploadedResponsesByProject = Record<string, Record<string, UploadedResponseCell>>;
+type UploadedResponseRecord = {
+  fileName: string;
+  parsedRows: string[][];
+  mappedResponses: Record<string, UploadedResponseCell>;
+  uploadedAt: string;
+};
+
+type UploadedResponsesByScope = Record<string, UploadedResponseRecord>;
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 
@@ -76,12 +83,19 @@ const selectedCreditsStorageKey = 'pms-feasibility-selected-credit-keys-by-proje
 const manualAchievableStorageKey = 'pms-feasibility-manual-achievable-by-project';
 const manualDoubtfulStorageKey = 'pms-feasibility-manual-doubtful-by-project';
 const reviewResponseStorageKey = 'pms-feasibility-review-response-by-project';
+const currentStateStorageKey = 'feasibility_current_state';
+const submissionType = 'pre';
 const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 type SelectedCreditsByProject = Record<ChecklistType, Record<string, Record<string, boolean>>>;
 type ManualAchievableByProject = Record<ChecklistType, Record<string, Record<string, number>>>;
 type ManualDoubtfulByProject = Record<ChecklistType, Record<string, Record<string, number>>>;
 
-const creditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Cr|Credit)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
+const getScopeKey = (projectId: string, type: ChecklistType): string => `${projectId}_${type.toUpperCase()}_${submissionType}`;
+const getSelectedCreditsScopeStorageKey = (scopeKey: string): string => `feasibility_selected_credits_${scopeKey}`;
+const getManualPointsScopeStorageKey = (scopeKey: string): string => `feasibility_manual_points_${scopeKey}`;
+const getReviewResponseScopeStorageKey = (scopeKey: string): string => `feasibility_review_response_${scopeKey}`;
+
+const creditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Cr|Credit|Mandatory\s+Requirement)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
 
 const isCreditRow = (row: string[], rowIndex: number): boolean => {
   const normalizedRow = normalizeHeader(row.join(' '));
@@ -99,10 +113,15 @@ const getCreditLabel = (row: string[]): string => (
 );
 
 const normalizeCreditKey = (value: string): string => (
-  (value.toLowerCase().match(/[a-z]+|\d+/g) ?? [])
+  (value
+    .toLowerCase()
+    .replace(/\bmandatory\s+requirements?\b/g, 'mr')
+    .replace(/\bcredits?\b/g, 'cr')
+    .match(/[a-z]+|\d+/g) ?? [])
     .map((token) => {
       if (token === 'rwh') return 'rhw';
       if (token === 'credit' || token === 'credits') return 'cr';
+      if (token === 'mandatory' || token === 'requirement' || token === 'requirements') return 'mr';
       return token;
     })
     .join('')
@@ -124,19 +143,90 @@ const getResponseStatus = (value: string): keyof UploadedResponseCell | null => 
 
 const getCreditMatchKeys = (creditCode: string, rowText: string): string[] => {
   const keys = new Set<string>();
-  [creditCode, rowText, `${creditCode} ${rowText}`].forEach((value) => {
+  const rowCreditCodes = Array.from(rowText.matchAll(new RegExp(creditPattern.source, 'gi')))
+    .map((match) => match[0]);
+  [creditCode, ...rowCreditCodes].forEach((value) => {
     const normalized = normalizeCreditKey(value);
     if (normalized) keys.add(normalized);
   });
   return Array.from(keys);
 };
 
+const isReviewResponseValue = (value: string): boolean => /^(?:y|n|\d+(?:\.\d+)?)$/i.test(value.trim());
+
+const addResponseValue = (cell: UploadedResponseCell, status: keyof UploadedResponseCell, value: string) => {
+  const cleaned = value.trim();
+  if (isReviewResponseValue(cleaned) && !cell[status].includes(cleaned)) cell[status].push(cleaned);
+};
+
+const sanitizeResponseCell = (cell: UploadedResponseCell): UploadedResponseCell => ({
+  expected: (cell.expected ?? []).filter(isReviewResponseValue),
+  pending: (cell.pending ?? []).filter(isReviewResponseValue),
+  denied: (cell.denied ?? []).filter(isReviewResponseValue),
+});
+
+const addResponseForKeys = (
+  result: Record<string, UploadedResponseCell>,
+  keys: string[],
+  status: keyof UploadedResponseCell,
+  value: string,
+) => {
+  keys.forEach((key) => {
+    result[key] = result[key] ?? emptyResponseCell();
+    addResponseValue(result[key], status, value);
+  });
+};
+
+const getPdfStatusValuesBeforeCredit = (cellsBeforeCredit: string[]): Partial<Record<keyof UploadedResponseCell, string>> => {
+  const values = cellsBeforeCredit
+    .map((cell) => cell.trim())
+    .filter(isReviewResponseValue);
+
+  if (values.length >= 3) {
+    return { expected: values[0], pending: values[1], denied: values[2] };
+  }
+
+  if (values.length === 2) {
+    return { expected: values[0], pending: values[1] };
+  }
+
+  if (values.length === 1) {
+    return { pending: values[0] };
+  }
+
+  return {};
+};
+
+const parseFlattenedReviewResponseRows = (rows: string[][]): Record<string, UploadedResponseCell> => {
+  const result: Record<string, UploadedResponseCell> = {};
+  const lines = rows.map((row) => row.join(' ').trim()).filter(Boolean);
+
+  lines.forEach((line, lineIndex) => {
+    const creditMatch = line.match(creditPattern);
+    if (!creditMatch) return;
+
+    const creditCode = creditMatch[0];
+    const keys = getCreditMatchKeys(creditCode, line);
+    const nearbyValues = lines
+      .slice(Math.max(0, lineIndex - 3), lineIndex)
+      .filter(isReviewResponseValue);
+    const statusValues = getPdfStatusValuesBeforeCredit(nearbyValues);
+
+    (Object.entries(statusValues) as Array<[keyof UploadedResponseCell, string | undefined]>).forEach(([status, value]) => {
+      if (value) addResponseForKeys(result, keys, status, value);
+    });
+  });
+
+  return result;
+};
+
 const parseReviewResponseRows = (rows: string[][]): Record<string, UploadedResponseCell> => {
-  const header = rows[0]?.map(normalizeHeader) ?? [];
-  const hasHeader = header.some(Boolean);
+  const headerIndex = rows.findIndex((row) => {
+    const statuses = new Set(row.map(getResponseStatus).filter(Boolean));
+    return statuses.has('expected') && statuses.has('pending') && statuses.has('denied');
+  });
+  const header = headerIndex >= 0 ? rows[headerIndex].map(normalizeHeader) : [];
   const creditColumn = header.findIndex((cell) => /credit|code|mr|cr/.test(cell));
-  const statusColumn = header.findIndex((cell) => /status|category|type/.test(cell));
-  const commentColumn = header.findIndex((cell) => /comment|remark|observation|description|query|response/.test(cell));
   const responseColumns: Record<keyof UploadedResponseCell, number> = {
     expected: header.findIndex((cell) => cell.includes('expected')),
     pending: header.findIndex((cell) => cell.includes('pending')),
@@ -144,7 +234,7 @@ const parseReviewResponseRows = (rows: string[][]): Record<string, UploadedRespo
   };
   const result: Record<string, UploadedResponseCell> = {};
 
-  rows.slice(hasHeader ? 1 : 0).forEach((row) => {
+  rows.slice(headerIndex >= 0 ? headerIndex + 1 : 0).forEach((row) => {
     const rowText = row.join(' ').trim();
     if (!rowText) return;
 
@@ -154,40 +244,33 @@ const parseReviewResponseRows = (rows: string[][]): Record<string, UploadedRespo
 
     const creditCode = creditMatch[0];
     const keys = getCreditMatchKeys(creditCode, rowText);
-    const hasSeparateColumns = Object.values(responseColumns).some((index) => index >= 0 && (row[index] ?? '').trim());
-
-    if (hasSeparateColumns) {
+    if (headerIndex >= 0) {
       keys.forEach((key) => {
         result[key] = result[key] ?? emptyResponseCell();
         (Object.entries(responseColumns) as Array<[keyof UploadedResponseCell, number]>).forEach(([status, index]) => {
-          const comment = index >= 0 ? (row[index] ?? '').trim() : '';
-          if (comment && !result[key][status].includes(comment)) result[key][status].push(comment);
+          const value = index >= 0 ? (row[index] ?? '').trim() : '';
+          addResponseValue(result[key], status, value);
         });
       });
       return;
     }
 
-    const status = statusColumn >= 0
-      ? getResponseStatus(row[statusColumn] ?? '')
-      : row.map(getResponseStatus).find(Boolean) ?? null;
-    if (!status) return;
-
-    const comment = (commentColumn >= 0 ? row[commentColumn] : '')
-      || row.filter((cell) => {
-        const normalized = normalizeHeader(cell);
-        return cell.trim()
-          && !creditPattern.test(cell)
-          && getResponseStatus(cell) === null
-          && !['accepted', 'approved', 'completed'].some((ignored) => normalized.includes(ignored));
-      }).join(' | ');
-    const trimmedComment = comment.trim();
-    if (!trimmedComment) return;
-
-    keys.forEach((key) => {
-      result[key] = result[key] ?? emptyResponseCell();
-      if (!result[key][status].includes(trimmedComment)) result[key][status].push(trimmedComment);
+    const creditCellIndex = row.findIndex((cell) => creditPattern.test(cell));
+    const statusValues = getPdfStatusValuesBeforeCredit(creditCellIndex >= 0 ? row.slice(0, creditCellIndex) : []);
+    (Object.entries(statusValues) as Array<[keyof UploadedResponseCell, string | undefined]>).forEach(([status, value]) => {
+      if (value) addResponseForKeys(result, keys, status, value);
     });
   });
+
+  if (headerIndex < 0) {
+    const flattenedResult = parseFlattenedReviewResponseRows(rows);
+    Object.entries(flattenedResult).forEach(([key, responseCell]) => {
+      result[key] = result[key] ?? emptyResponseCell();
+      (['expected', 'pending', 'denied'] as Array<keyof UploadedResponseCell>).forEach((status) => {
+        responseCell[status].forEach((value) => addResponseValue(result[key], status, value));
+      });
+    });
+  }
 
   return result;
 };
@@ -321,8 +404,10 @@ export default function FeasibilityPage() {
   const [selectedCredits, setSelectedCredits] = useState<SelectedCreditsByProject>({ nb: {}, gh: {} });
   const [manualAchievable, setManualAchievable] = useState<ManualAchievableByProject>({ nb: {}, gh: {} });
   const [manualDoubtful, setManualDoubtful] = useState<ManualDoubtfulByProject>({ nb: {}, gh: {} });
-  const [reviewResponses, setReviewResponses] = useState<UploadedResponsesByProject>({});
+  const [reviewResponses, setReviewResponses] = useState<UploadedResponsesByScope>({});
   const [uploadMessage, setUploadMessage] = useState('');
+  const [hydratedScopeKey, setHydratedScopeKey] = useState('');
+  const [reviewFileMenu, setReviewFileMenu] = useState<{ x: number; y: number } | null>(null);
 
   const projectOptions = useMemo(() => (
     projects.filter((project) => {
@@ -333,6 +418,19 @@ export default function FeasibilityPage() {
   ), [checklistType, projects]);
 
   useEffect(() => {
+    try {
+      const storedState = window.localStorage.getItem(currentStateStorageKey);
+      const parsedState = storedState ? JSON.parse(storedState) as Partial<{ selectedProjectId: string; checklistType: ChecklistType; submissionType: string }> : null;
+      if (parsedState?.checklistType === 'nb' || parsedState?.checklistType === 'gh') {
+        setChecklistType(parsedState.checklistType);
+      }
+      if (parsedState?.selectedProjectId) {
+        setSelectedProjectId(parsedState.selectedProjectId);
+      }
+    } catch {
+      window.localStorage.removeItem(currentStateStorageKey);
+    }
+
     try {
       const storedChecks = window.localStorage.getItem(selectedCreditsStorageKey);
       const parsed = storedChecks ? JSON.parse(storedChecks) as Partial<SelectedCreditsByProject> : null;
@@ -362,7 +460,7 @@ export default function FeasibilityPage() {
 
     try {
       const storedResponses = window.localStorage.getItem(reviewResponseStorageKey);
-      setReviewResponses(storedResponses ? JSON.parse(storedResponses) as UploadedResponsesByProject : {});
+      setReviewResponses(storedResponses ? JSON.parse(storedResponses) as UploadedResponsesByScope : {});
     } catch {
       window.localStorage.removeItem(reviewResponseStorageKey);
       setReviewResponses({});
@@ -387,9 +485,106 @@ export default function FeasibilityPage() {
     window.localStorage.setItem(reviewResponseStorageKey, JSON.stringify(reviewResponses));
   }, [reviewResponses]);
 
+  const currentScopeKey = selectedProjectId ? getScopeKey(selectedProjectId, checklistType) : '';
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    window.localStorage.setItem(currentStateStorageKey, JSON.stringify({
+      selectedProjectId,
+      checklistType,
+      submissionType,
+    }));
+  }, [checklistType, selectedProjectId]);
+
+  useEffect(() => {
+    if (!currentScopeKey || !selectedProjectId) return;
+    setHydratedScopeKey('');
+
+    try {
+      const scopedSelected = window.localStorage.getItem(getSelectedCreditsScopeStorageKey(currentScopeKey));
+      if (scopedSelected) {
+        const parsed = JSON.parse(scopedSelected) as Record<string, boolean>;
+        setSelectedCredits((current) => ({
+          ...current,
+          [checklistType]: {
+            ...(current[checklistType] ?? {}),
+            [selectedProjectId]: parsed,
+          },
+        }));
+      }
+    } catch {
+      window.localStorage.removeItem(getSelectedCreditsScopeStorageKey(currentScopeKey));
+    }
+
+    try {
+      const scopedManual = window.localStorage.getItem(getManualPointsScopeStorageKey(currentScopeKey));
+      if (scopedManual) {
+        const parsed = JSON.parse(scopedManual) as Partial<{ achievable: Record<string, number>; doubtful: Record<string, number> }>;
+        setManualAchievable((current) => ({
+          ...current,
+          [checklistType]: {
+            ...(current[checklistType] ?? {}),
+            [selectedProjectId]: parsed.achievable ?? {},
+          },
+        }));
+        setManualDoubtful((current) => ({
+          ...current,
+          [checklistType]: {
+            ...(current[checklistType] ?? {}),
+            [selectedProjectId]: parsed.doubtful ?? {},
+          },
+        }));
+      }
+    } catch {
+      window.localStorage.removeItem(getManualPointsScopeStorageKey(currentScopeKey));
+    }
+
+    try {
+      const scopedResponse = window.localStorage.getItem(getReviewResponseScopeStorageKey(currentScopeKey));
+      if (scopedResponse) {
+        const parsed = JSON.parse(scopedResponse) as UploadedResponseRecord;
+        setReviewResponses((current) => ({ ...current, [currentScopeKey]: parsed }));
+      }
+    } catch {
+      window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentScopeKey));
+    }
+    setHydratedScopeKey(currentScopeKey);
+  }, [checklistType, currentScopeKey, selectedProjectId]);
+
+  useEffect(() => {
+    if (!currentScopeKey || !selectedProjectId || hydratedScopeKey !== currentScopeKey) return;
+    const selectedForScope = selectedCredits[checklistType]?.[selectedProjectId] ?? {};
+    window.localStorage.setItem(getSelectedCreditsScopeStorageKey(currentScopeKey), JSON.stringify(selectedForScope));
+  }, [checklistType, currentScopeKey, hydratedScopeKey, selectedCredits, selectedProjectId]);
+
+  useEffect(() => {
+    if (!currentScopeKey || !selectedProjectId || hydratedScopeKey !== currentScopeKey) return;
+    window.localStorage.setItem(getManualPointsScopeStorageKey(currentScopeKey), JSON.stringify({
+      achievable: manualAchievable[checklistType]?.[selectedProjectId] ?? {},
+      doubtful: manualDoubtful[checklistType]?.[selectedProjectId] ?? {},
+    }));
+  }, [checklistType, currentScopeKey, hydratedScopeKey, manualAchievable, manualDoubtful, selectedProjectId]);
+
+  useEffect(() => {
+    if (!currentScopeKey || hydratedScopeKey !== currentScopeKey) return;
+    const responseForScope = reviewResponses[currentScopeKey];
+    if (responseForScope) {
+      window.localStorage.setItem(getReviewResponseScopeStorageKey(currentScopeKey), JSON.stringify(responseForScope));
+    }
+  }, [currentScopeKey, hydratedScopeKey, reviewResponses]);
+
   useEffect(() => {
     setSelectedProjectId((currentProjectId) => {
       if (projectOptions.some((project) => project.id === currentProjectId)) return currentProjectId;
+      try {
+        const storedState = window.localStorage.getItem(currentStateStorageKey);
+        const parsedState = storedState ? JSON.parse(storedState) as Partial<{ selectedProjectId: string; checklistType: ChecklistType }> : null;
+        if (parsedState?.checklistType === checklistType && projectOptions.some((project) => project.id === parsedState.selectedProjectId)) {
+          return parsedState.selectedProjectId ?? '';
+        }
+      } catch {
+        window.localStorage.removeItem(currentStateStorageKey);
+      }
       return projectOptions[0]?.id ?? '';
     });
   }, [projectOptions]);
@@ -497,7 +692,8 @@ export default function FeasibilityPage() {
   const selectedCreditsForProject = selectedCredits[checklistType]?.[selectedProjectId] ?? {};
   const manualAchievableForProject = manualAchievable[checklistType]?.[selectedProjectId] ?? {};
   const manualDoubtfulForProject = manualDoubtful[checklistType]?.[selectedProjectId] ?? {};
-  const reviewResponsesForProject = reviewResponses[selectedProjectId] ?? {};
+  const currentReviewResponse = currentScopeKey ? reviewResponses[currentScopeKey] : undefined;
+  const reviewResponsesForProject = currentReviewResponse?.mappedResponses ?? {};
   const selectedCreditCount = activeCreditKeys.filter((key) => selectedCreditsForProject[key]).length;
   const areAllCreditsSelected = Boolean(selectedProjectId) && activeCreditKeys.length > 0 && selectedCreditCount === activeCreditKeys.length;
 
@@ -655,12 +851,12 @@ export default function FeasibilityPage() {
     const creditCode = getCreditLabel(row);
     const keys = getCreditMatchKeys(creditCode, row.join(' '));
     const exactMatch = keys.map((key) => reviewResponsesForProject[key]).find(Boolean);
-    if (exactMatch) return exactMatch;
+    if (exactMatch) return sanitizeResponseCell(exactMatch);
 
     const fuzzyKey = Object.keys(reviewResponsesForProject).find((responseKey) => (
       keys.some((key) => responseKey === key || responseKey.includes(key) || key.includes(responseKey))
     ));
-    return fuzzyKey ? reviewResponsesForProject[fuzzyKey] : null;
+    return fuzzyKey ? sanitizeResponseCell(reviewResponsesForProject[fuzzyKey]) : null;
   };
 
   const handleReviewResponseUpload = async (file: File | null) => {
@@ -687,17 +883,38 @@ export default function FeasibilityPage() {
 
       const rows = Array.isArray(payload?.data) ? payload.data as string[][] : [];
       const mapped = parseReviewResponseRows(rows);
-      setReviewResponses((current) => ({ ...current, [selectedProjectId]: mapped }));
+      if (!currentScopeKey) return;
+      setReviewResponses((current) => ({
+        ...current,
+        [currentScopeKey]: {
+          fileName: file.name,
+          parsedRows: rows,
+          mappedResponses: mapped,
+          uploadedAt: new Date().toISOString(),
+        },
+      }));
       setUploadMessage(Object.keys(mapped).length > 0
-        ? `Review response uploaded. ${Object.keys(mapped).length} matched rows found.`
+        ? `Review response uploaded: ${file.name}. ${Object.keys(mapped).length} matched rows found.`
         : 'Review response uploaded, but no Expected/Pending/Denied data was found.');
     } catch {
       setUploadMessage('Failed to upload review response. Please confirm backend is running.');
     }
   };
 
+  const deleteUploadedReviewResponse = () => {
+    if (!currentScopeKey) return;
+    setReviewResponses((current) => {
+      const next = { ...current };
+      delete next[currentScopeKey];
+      return next;
+    });
+    window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentScopeKey));
+    setReviewFileMenu(null);
+    setUploadMessage('Uploaded review response deleted.');
+  };
+
   return (
-    <div className={styles.container}>
+    <div className={styles.container} onClick={() => setReviewFileMenu(null)}>
       <section className={`${styles.toolbar} glassmorphism`}>
         <div className={styles.titleBlock}>
           <h2>{checklistType.toUpperCase()} Feasibility Checklist</h2>
@@ -750,9 +967,32 @@ export default function FeasibilityPage() {
         <span>Total Achievable / Targeted Points <strong>{summary.achievable}</strong></span>
         <span>Total Not Targeted Points <strong>{summary.notTargeted}</strong></span>
         <span>Rating <strong>{getRating(summary.achievable)}</strong></span>
+        {currentReviewResponse?.fileName && (
+          <span
+            className={styles.reviewFilePill}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setReviewFileMenu({ x: event.clientX, y: event.clientY });
+            }}
+          >
+            Review Response <strong>{currentReviewResponse.fileName}</strong>
+          </span>
+        )}
         {uploadMessage && <span>{uploadMessage}</span>}
         {isReviewLoading && <span>Refreshing checklist status...</span>}
       </section>
+
+      {reviewFileMenu && currentReviewResponse && (
+        <div
+          className={styles.reviewFileContextMenu}
+          style={{ left: reviewFileMenu.x, top: reviewFileMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button type="button" onClick={deleteUploadedReviewResponse}>
+            Delete uploaded file
+          </button>
+        </div>
+      )}
 
       <section className={`${styles.panel} glassmorphism`}>
         {isLoading ? (

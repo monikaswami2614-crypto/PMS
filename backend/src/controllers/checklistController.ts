@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { inflateSync } from 'zlib';
 import XLSX from 'xlsx';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import prisma from '../config/prisma.js';
 import { logActivity } from '../services/activityLogService.js';
 import { sendFilePreviewPage, sendInlineFile } from '../utils/filePreview.js';
@@ -143,6 +144,140 @@ const pdfTextToRows = (text: string): string[][] => (
     .filter(Boolean)
     .map((line) => line.split(/\s{2,}|\t+/).map((cell) => cell.trim()).filter(Boolean))
 );
+
+type PositionedPdfText = {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+};
+
+type PositionedPdfLine = {
+  text: string;
+  x: number;
+  y: number;
+};
+
+const reviewCreditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Credit|Mandatory\s+Requirement)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
+const isReviewResponseValue = (value: string): boolean => /^(?:y|n|\d+(?:\.\d+)?)$/i.test(value.trim());
+
+const groupPositionedPdfLines = (items: PositionedPdfText[]): PositionedPdfLine[] => {
+  const lines: Array<{ items: PositionedPdfText[]; y: number }> = [];
+
+  [...items]
+    .sort((first, second) => second.y - first.y || first.x - second.x)
+    .forEach((item) => {
+      const line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
+      if (line) {
+        line.items.push(item);
+        return;
+      }
+      lines.push({ items: [item], y: item.y });
+    });
+
+  return lines
+    .map((line) => {
+      const sortedItems = line.items.sort((first, second) => first.x - second.x);
+      return {
+        text: sortedItems.map((item) => item.text).join(' ').replace(/\s+/g, ' ').trim(),
+        x: sortedItems[0]?.x ?? 0,
+        y: line.y,
+      };
+    })
+    .filter((line) => line.text);
+};
+
+const getPdfCreditCandidates = (lines: PositionedPdfLine[]): PositionedPdfLine[] => {
+  const candidates: PositionedPdfLine[] = [];
+
+  lines.forEach((line, lineIndex) => {
+    const directMatch = line.text.match(reviewCreditPattern);
+    if (directMatch) {
+      candidates.push({ ...line, text: directMatch[0] });
+      return;
+    }
+
+    const mandatoryPrefix = line.text.match(/\b([A-Z]{1,4})\s+Mandatory\b/i);
+    if (!mandatoryPrefix) return;
+
+    const continuation = lines
+      .slice(lineIndex + 1, lineIndex + 4)
+      .find((candidate) => (
+        Math.abs(candidate.y - line.y) <= 35
+        && /\bRequirement\s*\d+(?:\.\d+)?\b/i.test(candidate.text)
+      ));
+    const requirement = continuation?.text.match(/\bRequirement\s*\d+(?:\.\d+)?\b/i)?.[0];
+    if (requirement) {
+      candidates.push({ ...line, text: `${mandatoryPrefix[1]} Mandatory ${requirement}` });
+    }
+  });
+
+  return candidates.filter((candidate, index) => (
+    candidates.findIndex((other) => other.text === candidate.text && Math.abs(other.y - candidate.y) <= 3) === index
+  ));
+};
+
+const extractPdfReviewResponseRows = async (body: Buffer): Promise<string[][]> => {
+  const loadingTask = getDocument({ data: new Uint8Array(body) });
+  const document = await loadingTask.promise;
+  const rows: string[][] = [['Expected', 'Pending', 'Denied', 'Credit']];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      const items = textContent.items.flatMap((item) => {
+        if (!('str' in item) || !item.str.trim()) return [];
+        return [{
+          text: item.str.trim(),
+          x: item.transform[4],
+          y: item.transform[5],
+          width: item.width,
+        }];
+      });
+      const statusHeaders = (['expected', 'pending', 'denied'] as const).map((status) => {
+        const header = items.find((item) => normalizeHeader(item.text) === status);
+        return header ? { status, x: header.x - 6 } : null;
+      });
+      if (statusHeaders.some((header) => header === null)) continue;
+
+      const headers = statusHeaders.filter((header): header is NonNullable<typeof header> => Boolean(header));
+      const sortedHeaderXs = headers.map((header) => header.x).sort((first, second) => first - second);
+      const columnTolerance = Math.max(
+        10,
+        Math.min(...sortedHeaderXs.slice(1).map((x, index) => x - sortedHeaderXs[index])) * 0.45,
+      );
+      const valueItems = items.filter((item) => isReviewResponseValue(item.text));
+      const creditCandidates = getPdfCreditCandidates(groupPositionedPdfLines(items));
+
+      creditCandidates.forEach((credit) => {
+        const values: Record<'expected' | 'pending' | 'denied', string> = {
+          expected: '',
+          pending: '',
+          denied: '',
+        };
+
+        headers.forEach((header) => {
+          const value = valueItems
+            .filter((item) => (
+              Math.abs(item.x - header.x) <= columnTolerance
+              && Math.abs(item.y - credit.y) <= 12
+            ))
+            .sort((first, second) => (
+              Math.abs(first.y - credit.y) - Math.abs(second.y - credit.y)
+            ))[0];
+          values[header.status] = value?.text ?? '';
+        });
+
+        rows.push([values.expected, values.pending, values.denied, credit.text]);
+      });
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
+
+  return rows;
+};
 
 type SuggestedFileName = {
   fileId: string;
@@ -959,9 +1094,9 @@ export const parseReviewResponseFile = async (req: Request, res: Response): Prom
     }
 
     if (fileName.endsWith('.pdf')) {
-      const rows = pdfTextToRows(extractPdfText(body));
+      const rows = await extractPdfReviewResponseRows(body);
       res.json({
-        message: 'PDF review response converted and parsed successfully',
+        message: 'PDF review response columns parsed successfully',
         data: rows,
       });
       return;

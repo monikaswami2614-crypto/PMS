@@ -150,6 +150,40 @@
   cursor: pointer;
 }
 
+.reviewFilePill {
+  cursor: context-menu;
+}
+
+.reviewFileContextMenu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 172px;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: var(--shadow-lg);
+}
+
+.reviewFileContextMenu button {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--border-radius-sm);
+  background: transparent;
+  color: #fecaca;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reviewFileContextMenu button:hover {
+  background: rgba(127, 29, 29, 0.35);
+  color: #ffffff;
+}
+
 .activeFilter {
   color: #ffffff;
   border-color: rgba(99, 102, 241, 0.72);
