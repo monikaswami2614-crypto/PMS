@@ -11,6 +11,7 @@ import {
   updateChecklistStatusesForScope,
 } from '@/utils/certificationWorkflow';
 import ClientMailButton from '@/components/ClientMailButton';
+import { logClientActivity } from '@/utils/activityLog';
 import styles from '../checklist-review/page.module.css';
 
 type RequirementStatus = 'pending' | 'missing' | 'checked' | 'overridden';
@@ -230,6 +231,9 @@ export default function CertificationFiltrationPage() {
   const [clientDataFileFilter, setClientDataFileFilter] = useState<ClientDataFileFilter>('all');
   const [hydratedWorkflowKey, setHydratedWorkflowKey] = useState('');
   const [selectedFeasibilityCredits, setSelectedFeasibilityCredits] = useState<Record<string, boolean>>({});
+  const [isSavingProjectFiles, setIsSavingProjectFiles] = useState(false);
+  const [projectSaveMessage, setProjectSaveMessage] = useState('');
+  const [projectSaveError, setProjectSaveError] = useState('');
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -1145,6 +1149,67 @@ export default function CertificationFiltrationPage() {
     console.log('Certification filtration save payload', payload);
   };
 
+  const saveAllFiltrationFiles = async () => {
+    if (!filtrationData || !effectiveSelectedProjectId || isSavingProjectFiles) return;
+
+    setIsSavingProjectFiles(true);
+    setProjectSaveMessage('');
+    setProjectSaveError('');
+
+    const credits = filtrationData.groups.map((group) => ({
+      creditName: group.creditName,
+      subCreditName: group.subCreditName,
+      supportingFiles: getSupportingFiles(group).map((file) => ({
+        id: file.id,
+        displayName: getDisplayName(file),
+      })),
+      submissionFiles: getSubmissionFiles(group).map((file) => ({
+        id: file.id,
+        displayName: getDisplayName(file),
+      })),
+    }));
+
+    try {
+      const response = await fetch(
+        `${apiBase}/api/checklists/review/${effectiveSelectedProjectId}/filtration/save`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phase, submissionMode, credits }),
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Failed to save filtration files');
+      }
+
+      const filesCopied = Number(payload?.data?.filesCopied) || 0;
+      const submissionLabel = phase === 'pre' ? 'IGBC Pre Submission' : 'IGBC Final Submission';
+      setProjectSaveMessage(
+        `${filesCopied} file${filesCopied === 1 ? '' : 's'} saved in Software Data / Supporting Document and ${submissionLabel}.`,
+      );
+      void logClientActivity({
+        actionType: 'Filtration files saved',
+        moduleName: 'DATA FILTRATION',
+        projectId: effectiveSelectedProjectId,
+        projectName: filtrationData.project.name,
+        description: `${filesCopied} filtration file${filesCopied === 1 ? '' : 's'} saved in the project Software Data folder.`,
+        newValue: {
+          phase,
+          submissionMode,
+          filesCopied,
+          creditCount: credits.length,
+          supportingFiles: credits.reduce((total, credit) => total + credit.supportingFiles.length, 0),
+          submissionFiles: credits.reduce((total, credit) => total + credit.submissionFiles.length, 0),
+        },
+      });
+    } catch (err) {
+      setProjectSaveError(err instanceof Error ? err.message : 'Failed to save filtration files');
+    } finally {
+      setIsSavingProjectFiles(false);
+    }
+  };
+
   const selectedCount = (group: FiltrationGroup, scope: SelectableFileScope) => getSelectedKeys(group, scope).length;
 
   const renderFileRow = (group: FiltrationGroup, file: SheetFile, scope: 'filtration' | 'supporting' | 'final' | 'ai-filter') => {
@@ -1511,12 +1576,24 @@ export default function CertificationFiltrationPage() {
           <div className={styles.certificationMetaPills}>
             <span className={styles.summaryPill}>{filtrationData?.project.type ?? (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType ?? 'Project')}</span>
             <span className={styles.summaryPill}>{filtrationData?.groups.length ?? 0} Credits</span>
+            <button
+              type="button"
+              className={styles.saveSheetButton}
+              onClick={() => void saveAllFiltrationFiles()}
+              disabled={isLoading || isSavingProjectFiles || !filtrationData}
+              title="Save all Supporting Document and IGBC submission files in the project"
+            >
+              {isSavingProjectFiles ? <Loader2 size={15} className="loading-icon" /> : <Save size={15} />}
+              {isSavingProjectFiles ? 'Saving...' : 'Save Project Files'}
+            </button>
             <ClientMailButton
               projectId={effectiveSelectedProjectId}
               projectName={filtrationData?.project.name || selectedProject?.name}
               projectType={filtrationData?.project.type || (inferredType === 'GREEN_HOMES' ? 'GH' : inferredType || undefined)}
               disabled={isLoading || !filtrationData}
             />
+            {projectSaveMessage && <span className={styles.projectSaveSuccess} role="status">{projectSaveMessage}</span>}
+            {projectSaveError && <span className={styles.projectSaveError} role="alert">{projectSaveError}</span>}
           </div>
         </div>
 

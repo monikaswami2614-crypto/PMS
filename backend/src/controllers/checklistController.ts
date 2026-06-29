@@ -1389,6 +1389,270 @@ export const updateChecklistReviewStatus = async (req: Request, res: Response): 
   }
 };
 
+type FiltrationSaveFile = {
+  id?: string;
+  displayName?: string;
+};
+
+type FiltrationSaveCredit = {
+  creditName?: string;
+  subCreditName?: string;
+  supportingFiles?: FiltrationSaveFile[];
+  submissionFiles?: FiltrationSaveFile[];
+};
+
+const sanitizeSavedFolderName = (value: string, fallback: string): string => {
+  const sanitized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/[.\s]+$/g, '')
+    .replace(/\s+/g, ' ');
+  return sanitized && sanitized !== '.' && sanitized !== '..' ? sanitized : fallback;
+};
+
+const sanitizeSavedFileName = (value: string, sourceName: string): string => {
+  const sourceExtension = path.extname(sourceName);
+  const sanitized = sanitizeSavedFolderName(value || sourceName, path.basename(sourceName));
+  return path.extname(sanitized) || !sourceExtension ? sanitized : `${sanitized}${sourceExtension}`;
+};
+
+const isPathInside = (rootPath: string, candidatePath: string): boolean => {
+  const relativePath = path.relative(rootPath, candidatePath);
+  return relativePath !== ''
+    && !relativePath.startsWith('..')
+    && !path.isAbsolute(relativePath);
+};
+
+export const saveFiltrationProjectFiles = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { projectId } = req.params;
+    const { phase, submissionMode, credits } = req.body as {
+      phase?: 'pre' | 'final';
+      submissionMode?: 'first' | 'second';
+      credits?: FiltrationSaveCredit[];
+    };
+
+    if (phase !== 'pre' && phase !== 'final') {
+      res.status(400).json({ error: 'Phase must be pre or final' });
+      return;
+    }
+    if (submissionMode !== 'first' && submissionMode !== 'second') {
+      res.status(400).json({ error: 'Submission mode must be first or second' });
+      return;
+    }
+    if (!Array.isArray(credits) || credits.length === 0) {
+      res.status(400).json({ error: 'At least one credit is required' });
+      return;
+    }
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, name: true, rootPath: true },
+    });
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    if (!project.rootPath) {
+      res.status(400).json({ error: 'The project does not have a folder path' });
+      return;
+    }
+
+    const projectRootPath = path.resolve(project.rootPath);
+    const projectRootStats = await fs.stat(projectRootPath).catch(() => null);
+    if (!projectRootStats?.isDirectory()) {
+      res.status(400).json({ error: 'The project folder is not available on disk' });
+      return;
+    }
+
+    const requestedFiles = credits.flatMap((credit) => [
+      ...(Array.isArray(credit.supportingFiles) ? credit.supportingFiles : []),
+      ...(Array.isArray(credit.submissionFiles) ? credit.submissionFiles : []),
+    ]);
+    const requestedFileIds = Array.from(new Set(requestedFiles
+      .map((file) => file.id?.trim())
+      .filter((id): id is string => Boolean(id))));
+    const storedFiles = requestedFileIds.length > 0
+      ? await prisma.file.findMany({
+        where: { projectId, id: { in: requestedFileIds } },
+        select: { id: true, name: true, path: true, extension: true },
+      })
+      : [];
+    const storedFilesById = new Map(storedFiles.map((file) => [file.id, file]));
+
+    if (storedFiles.length !== requestedFileIds.length) {
+      res.status(400).json({ error: 'One or more selected files do not belong to this project' });
+      return;
+    }
+
+    for (const file of storedFiles) {
+      const sourcePath = path.resolve(file.path);
+      if (!isPathInside(projectRootPath, sourcePath)) {
+        res.status(400).json({ error: `File "${file.name}" is outside the project folder` });
+        return;
+      }
+      const sourceStats = await fs.stat(sourcePath).catch(() => null);
+      if (!sourceStats?.isFile()) {
+        res.status(400).json({ error: `Source file "${file.name}" is not available` });
+        return;
+      }
+    }
+
+    const softwareDataPath = path.join(projectRootPath, 'Software Data');
+    const supportingRootPath = path.join(softwareDataPath, 'Supporting Document');
+    const submissionFolderName = phase === 'pre' ? 'IGBC Pre Submission' : 'IGBC Final Submission';
+    const submissionRootPath = path.join(softwareDataPath, submissionFolderName);
+    await fs.mkdir(supportingRootPath, { recursive: true });
+    await fs.mkdir(submissionRootPath, { recursive: true });
+
+    const rootFolder = await prisma.folder.findFirst({
+      where: { projectId, parentId: null },
+      orderBy: { createdAt: 'asc' },
+    }) ?? await prisma.folder.create({
+      data: {
+        name: path.basename(projectRootPath),
+        path: projectRootPath,
+        relativePath: '',
+        projectId,
+      },
+    });
+
+    const ensureFolderRecord = async (
+      folderPath: string,
+      parentId: string,
+    ) => {
+      const relativePath = path.relative(projectRootPath, folderPath).split(path.sep).join('/');
+      const existingFolder = await prisma.folder.findFirst({ where: { projectId, relativePath } });
+      if (existingFolder) {
+        return prisma.folder.update({
+          where: { id: existingFolder.id },
+          data: { name: path.basename(folderPath), path: folderPath, parentId },
+        });
+      }
+      return prisma.folder.create({
+        data: {
+          name: path.basename(folderPath),
+          path: folderPath,
+          relativePath,
+          projectId,
+          parentId,
+        },
+      });
+    };
+
+    const softwareDataFolder = await ensureFolderRecord(softwareDataPath, rootFolder.id);
+    const supportingRootFolder = await ensureFolderRecord(supportingRootPath, softwareDataFolder.id);
+    const submissionRootFolder = await ensureFolderRecord(submissionRootPath, softwareDataFolder.id);
+    let copiedFileCount = 0;
+    let createdCreditFolderCount = 0;
+
+    const copyCreditFiles = async (
+      files: FiltrationSaveFile[],
+      targetFolderPath: string,
+      targetFolderId: string,
+    ) => {
+      const usedNames = new Set<string>();
+      for (const requestedFile of files) {
+        const source = requestedFile.id ? storedFilesById.get(requestedFile.id) : undefined;
+        if (!source) continue;
+
+        const preferredName = sanitizeSavedFileName(requestedFile.displayName || source.name, source.name);
+        const parsedName = path.parse(preferredName);
+        let destinationName = preferredName;
+        let suffix = 2;
+        while (usedNames.has(destinationName.toLowerCase())) {
+          destinationName = `${parsedName.name} (${suffix})${parsedName.ext}`;
+          suffix += 1;
+        }
+        usedNames.add(destinationName.toLowerCase());
+
+        const sourcePath = path.resolve(source.path);
+        const destinationPath = path.join(targetFolderPath, destinationName);
+        if (sourcePath.toLowerCase() !== path.resolve(destinationPath).toLowerCase()) {
+          await fs.copyFile(sourcePath, destinationPath);
+        }
+
+        const stats = await fs.stat(destinationPath);
+        const relativePath = path.relative(projectRootPath, destinationPath).split(path.sep).join('/');
+        const existingFile = await prisma.file.findFirst({ where: { projectId, relativePath } });
+        const fileData = {
+          name: destinationName,
+          path: destinationPath,
+          relativePath,
+          extension: path.extname(destinationName).slice(1).toLowerCase() || null,
+          size: stats.size,
+          modifiedAt: stats.mtime,
+          folderId: targetFolderId,
+        };
+        if (existingFile) {
+          await prisma.file.update({ where: { id: existingFile.id }, data: fileData });
+        } else {
+          await prisma.file.create({ data: { ...fileData, projectId } });
+        }
+        copiedFileCount += 1;
+      }
+    };
+
+    for (const [creditIndex, credit] of credits.entries()) {
+      const rawCreditName = credit.creditName?.trim() || credit.subCreditName?.trim() || `Credit ${creditIndex + 1}`;
+      const creditFolderName = sanitizeSavedFolderName(rawCreditName, `Credit ${creditIndex + 1}`);
+      const supportingCreditPath = path.join(supportingRootPath, creditFolderName);
+      const submissionCreditPath = path.join(submissionRootPath, creditFolderName);
+      await fs.mkdir(supportingCreditPath, { recursive: true });
+      await fs.mkdir(submissionCreditPath, { recursive: true });
+
+      const supportingCreditFolder = await ensureFolderRecord(supportingCreditPath, supportingRootFolder.id);
+      const submissionCreditFolder = await ensureFolderRecord(submissionCreditPath, submissionRootFolder.id);
+      createdCreditFolderCount += 2;
+
+      await copyCreditFiles(
+        Array.isArray(credit.supportingFiles) ? credit.supportingFiles : [],
+        supportingCreditPath,
+        supportingCreditFolder.id,
+      );
+      await copyCreditFiles(
+        Array.isArray(credit.submissionFiles) ? credit.submissionFiles : [],
+        submissionCreditPath,
+        submissionCreditFolder.id,
+      );
+    }
+
+    await logActivity({
+      actionType: 'Filtration files saved',
+      moduleName: 'DATA FILTRATION',
+      projectId,
+      projectName: project.name,
+      description: `${copiedFileCount} filtration file${copiedFileCount === 1 ? '' : 's'} saved to Software Data.`,
+      newValue: {
+        phase,
+        submissionMode,
+        softwareDataFolder: softwareDataPath,
+        supportingFolder: supportingRootPath,
+        submissionFolder: submissionRootPath,
+        creditFolders: createdCreditFolderCount,
+        filesCopied: copiedFileCount,
+      },
+      request: req,
+    });
+
+    res.json({
+      message: 'Filtration files saved successfully',
+      data: {
+        rootPath: softwareDataPath,
+        supportingFolder: supportingRootPath,
+        submissionFolder: submissionRootPath,
+        creditFolders: createdCreditFolderCount,
+        filesCopied: copiedFileCount,
+      },
+    });
+  } catch (error) {
+    console.error('saveFiltrationProjectFiles error', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to save filtration files',
+    });
+  }
+};
+
 export const suggestChecklistFileNames = async (req: Request, res: Response): Promise<void> => {
   try {
     const { projectId } = req.params;

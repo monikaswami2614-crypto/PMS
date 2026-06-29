@@ -139,6 +139,21 @@
   padding: 5px 10px;
 }
 
+.projectSaveSuccess,
+.projectSaveError {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.projectSaveSuccess {
+  color: var(--success-text);
+}
+
+.projectSaveError {
+  color: var(--danger-text);
+}
+
 .certificationFilterRight {
   margin-left: auto;
   justify-content: flex-end;
@@ -622,6 +637,11 @@
 }
 
 .filtrationButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.saveSheetButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
