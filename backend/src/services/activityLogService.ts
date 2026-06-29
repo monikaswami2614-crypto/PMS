@@ -44,7 +44,21 @@ export const logActivity = async ({
   request,
 }: LogActivityInput): Promise<void> => {
   const requestUser = getActivityUserFromRequest(request);
-  const resolvedUser = user || requestUser;
+  let resolvedUser = user || requestUser;
+
+  if (resolvedUser?.id && (!resolvedUser.name || !resolvedUser.email)) {
+    const storedUser = await prisma.user.findUnique({
+      where: { id: resolvedUser.id },
+      select: { id: true, name: true, email: true },
+    });
+    if (storedUser) {
+      resolvedUser = {
+        id: storedUser.id,
+        name: resolvedUser.name || storedUser.name,
+        email: resolvedUser.email || storedUser.email,
+      };
+    }
+  }
 
   await prisma.activityLog.create({
     data: {

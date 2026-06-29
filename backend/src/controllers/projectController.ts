@@ -669,6 +669,23 @@ export const createProject = async (req: AuthRequest, res: Response): Promise<vo
       }
     });
     await createProjectAddedNotification(project.id, project.name);
+    await logActivity({
+      user: { id: req.userId },
+      actionType: 'Project created',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: project.name,
+      description: `Project "${project.name}" created.`,
+      newValue: {
+        name: project.name,
+        description: project.description,
+        category: project.category,
+        status: project.status,
+        startDate: project.startDate,
+        endDate: project.endDate,
+      },
+      request: req,
+    });
 
     res.status(201).json({
       message: 'Project created successfully',
@@ -740,6 +757,31 @@ export const updateProject = async (req: AuthRequest, res: Response): Promise<vo
         }
       }
     });
+    await logActivity({
+      user: { id: req.userId },
+      actionType: 'Project updated',
+      moduleName: 'PROJECT',
+      projectId: updatedProject.id,
+      projectName: updatedProject.name,
+      description: `Project "${updatedProject.name}" details updated.`,
+      oldValue: {
+        name: existingProject.name,
+        description: existingProject.description,
+        category: existingProject.category,
+        status: existingProject.status,
+        startDate: existingProject.startDate,
+        endDate: existingProject.endDate,
+      },
+      newValue: {
+        name: updatedProject.name,
+        description: updatedProject.description,
+        category: updatedProject.category,
+        status: updatedProject.status,
+        startDate: updatedProject.startDate,
+        endDate: updatedProject.endDate,
+      },
+      request: req,
+    });
 
     res.json({
       message: 'Project updated successfully',
@@ -765,6 +807,23 @@ export const deleteProject = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
+    await logActivity({
+      user: { id: req.userId },
+      actionType: 'Project deleted',
+      moduleName: 'PROJECT',
+      projectId: project.id,
+      projectName: project.name,
+      description: `Project "${project.name}" deleted.`,
+      oldValue: {
+        name: project.name,
+        description: project.description,
+        category: project.category,
+        status: project.status,
+        startDate: project.startDate,
+        endDate: project.endDate,
+      },
+      request: req,
+    });
     await prisma.project.delete({ where: { id } });
 
     res.json({ message: 'Project deleted successfully' });

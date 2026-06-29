@@ -411,7 +411,7 @@ const isSubtotalRow = (row: string[], rowIndex: number, sheet: ChecklistSheet): 
 };
 
 export default function FeasibilityPage() {
-  const { projects } = useProjects();
+  const { projects, setSelectedProject } = useProjects();
   const [checklistType, setChecklistType] = useState<ChecklistType>('nb');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [workbook, setWorkbook] = useState<ChecklistWorkbook | null>(null);
@@ -646,6 +646,12 @@ export default function FeasibilityPage() {
       return projectOptions[0]?.id ?? '';
     });
   }, [projectOptions]);
+
+  useEffect(() => {
+    if (selectedProjectId) {
+      setSelectedProject(selectedProjectId);
+    }
+  }, [selectedProjectId, setSelectedProject]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1178,8 +1184,10 @@ export default function FeasibilityPage() {
       </section>
 
       <section className={`${styles.summaryBar} glassmorphism`}>
+        <span>Total Credits <strong>{activeCreditKeys.length}</strong></span>
         <span>Total Available Points <strong>{summary.available}</strong></span>
         <span>Total Achievable / Targeted Points <strong>{summary.achievable}</strong></span>
+        <span>Total Doubtful Points <strong>{summary.doubtful}</strong></span>
         <span>Total Not Targeted Points <strong>{summary.notTargeted}</strong></span>
         <span>Rating <strong>{getRating(summary.achievable)}</strong></span>
         {currentReviewResponse?.fileName && (

@@ -169,7 +169,7 @@
   padding: 6px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
-  background: rgba(15, 23, 42, 0.98);
+  background: var(--dropdown-bg);
   box-shadow: var(--shadow-lg);
 }
 
@@ -180,7 +180,7 @@
   border: 0;
   border-radius: var(--border-radius-sm);
   background: transparent;
-  color: #fecaca;
+  color: var(--danger-text);
   font-size: 0.8rem;
   font-weight: 800;
   text-align: left;
@@ -303,11 +303,11 @@
   width: 100%;
   min-width: 1380px;
   border-collapse: collapse;
-  background: rgba(15, 22, 38, 0.48);
+  background: rgba(var(--surface-rgb), 0.72);
 }
 
 .table td {
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid var(--border-color);
   padding: 10px 11px;
   color: var(--text-primary);
   font-size: 0.86rem;
@@ -321,7 +321,7 @@
 .reviewDataTitle {
   height: 38px;
   padding: 8px 11px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid var(--border-color);
   color: var(--text-primary);
   font-size: 0.84rem;
   font-weight: 900;
@@ -329,12 +329,12 @@
 }
 
 .feasibilityDataTitle {
-  background: #151b32;
+  background: var(--bg-tertiary);
 }
 
 .reviewDataTitle {
-  border-left: 8px solid rgba(71, 85, 105, 0.9);
-  background: #172033;
+  border-left: 8px solid var(--border-color-hover);
+  background: var(--bg-secondary);
 }
 
 .table .checkboxCell {
@@ -379,49 +379,49 @@
 .reviewResponseCell {
   width: 180px;
   min-width: 180px;
-  background: rgba(17, 24, 39, 0.88);
-  border-color: rgba(100, 116, 139, 0.3) !important;
+  background: rgba(var(--raised-surface-rgb), 0.88);
+  border-color: var(--border-color) !important;
 }
 
 .reviewResponseDivider {
-  border-left: 8px solid rgba(71, 85, 105, 0.9) !important;
+  border-left: 8px solid var(--border-color-hover) !important;
 }
 
 .reviewResponseHeader {
   position: sticky;
   top: 0;
   z-index: 4;
-  background: #172033 !important;
+  background: var(--bg-secondary) !important;
   color: var(--text-primary);
   font-weight: 900 !important;
-  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.2);
+  box-shadow: 0 1px 0 var(--border-color);
 }
 
 .expectedHeader {
-  color: #34d399 !important;
+  color: var(--success-text) !important;
 }
 
 .pendingHeader {
-  color: #fb7185 !important;
+  color: var(--danger-text) !important;
 }
 
 .deniedHeader {
-  color: #fbbf24 !important;
+  color: var(--warning-text) !important;
 }
 
 .expectedResponse {
   background: rgba(16, 185, 129, 0.14) !important;
-  color: #6ee7b7 !important;
+  color: var(--success-soft-text) !important;
 }
 
 .pendingResponse {
   background: rgba(244, 63, 94, 0.14) !important;
-  color: #fda4af !important;
+  color: var(--danger-text) !important;
 }
 
 .deniedResponse {
   background: rgba(245, 158, 11, 0.14) !important;
-  color: #fcd34d !important;
+  color: var(--warning-text) !important;
 }
 
 .expectedResponse .responseList,
@@ -444,7 +444,7 @@
 }
 
 .noResponse {
-  color: #94a3b8;
+  color: var(--text-secondary);
   font-weight: 800;
 }
 
@@ -466,16 +466,16 @@
   position: sticky;
   top: 0;
   z-index: 4;
-  background: #151b32 !important;
-  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.2);
+  background: var(--bg-tertiary) !important;
+  box-shadow: 0 1px 0 var(--border-color);
 }
 
 tr:has(.stickyHeaderCell) .checkboxCell {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: #151b32;
-  box-shadow: 0 1px 0 rgba(148, 163, 184, 0.2);
+  background: var(--bg-tertiary);
+  box-shadow: 0 1px 0 var(--border-color);
 }
 
 .state {
