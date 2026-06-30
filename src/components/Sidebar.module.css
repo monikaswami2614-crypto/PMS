@@ -86,7 +86,7 @@
 
 /* Project Selector */
 .projectSelectorSection {
-  margin-bottom: 24px;
+  margin-bottom: 18px;
   padding: 0 10px;
 }
 
@@ -103,6 +103,20 @@
 .projectButtonGroup {
   display: grid;
   gap: 8px;
+}
+
+.sourceButtonGroup {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sourceButtonGroup .projectButton {
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 7px;
+  font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .projectButton {

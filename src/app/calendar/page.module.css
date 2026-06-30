@@ -191,7 +191,7 @@
 .daysGrid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-auto-rows: 110px;
+  grid-auto-rows: minmax(110px, auto);
   overflow: hidden;
   padding: 1px;
 }
@@ -283,7 +283,6 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 8px;
-  overflow: hidden;
 }
 
 .taskStrip {
@@ -374,13 +373,6 @@
 .done .priorityDot {
   background-color: #22c55e;
   box-shadow: 0 0 4px #22c55e;
-}
-
-.moreTasks {
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  padding-left: 6px;
 }
 
 .deadlineOverlay {
@@ -662,7 +654,7 @@
   }
 
   .daysGrid {
-    grid-auto-rows: 90px;
+    grid-auto-rows: minmax(90px, auto);
   }
   .taskStrip {
     padding: 2px 4px;
@@ -719,7 +711,7 @@
   }
 
   .daysGrid {
-    grid-auto-rows: 72px;
+    grid-auto-rows: minmax(72px, auto);
   }
 
   .cell {

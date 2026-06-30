@@ -880,10 +880,22 @@ export default function FeasibilityPage() {
   ]);
 
   const summary = useMemo(() => {
-    if (!activeSheet) return { available: 0, achievable: 0, doubtful: 0, notTargeted: 0, selected: 0 };
+    if (!activeSheet) {
+      return {
+        available: 0,
+        achievable: 0,
+        doubtful: 0,
+        notTargeted: 0,
+        selected: 0,
+      };
+    }
 
     const totals = activeSheet.rows.reduce((nextTotals, row, rowIndex) => {
-      if (!isCreditRow(row, rowIndex) || isRequiredRow(row, activeSheet)) return nextTotals;
+      if (!isCreditRow(row, rowIndex)) return nextTotals;
+
+      if (isRequiredRow(row, activeSheet)) {
+        return nextTotals;
+      }
 
       const availablePoints = getAvailablePoints(row, activeSheet);
       if (availablePoints === null) return nextTotals;
@@ -897,7 +909,13 @@ export default function FeasibilityPage() {
         notTargeted: nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
         selected: nextTotals.selected + (selectedCreditsForProject[getCreditKey(row)] ? 1 : 0),
       };
-    }, { available: 0, achievable: 0, doubtful: 0, notTargeted: 0, selected: 0 });
+    }, {
+      available: 0,
+      achievable: 0,
+      doubtful: 0,
+      notTargeted: 0,
+      selected: 0,
+    });
 
     const cappedAvailable = Math.min(100, totals.available);
     const cappedAchievable = Math.min(cappedAvailable, totals.achievable);
@@ -919,6 +937,14 @@ export default function FeasibilityPage() {
     selectedCreditsForProject,
     submissionRound,
   ]);
+  const rating = getRating(summary.achievable);
+  const ratingStyle = rating === 'Gold'
+    ? styles.summaryGold
+    : rating === 'Silver'
+      ? styles.summarySilver
+      : rating === 'Platinum'
+        ? styles.summaryPlatinum
+        : '';
 
   const toggleAllCredits = () => {
     if (activeCreditKeys.length === 0 || !selectedProjectId) return;
@@ -1121,7 +1147,7 @@ export default function FeasibilityPage() {
       <section className={`${styles.toolbar} glassmorphism`}>
         <div className={`${styles.topControls} ${styles.fullTopControls}`}>
           <select
-            className={styles.projectSelect}
+            className={`${styles.projectSelect} ${styles.primaryProjectSelect}`}
             value={selectedProjectId}
             onChange={(event) => {
               setSelectedProjectId(event.target.value);
@@ -1183,13 +1209,12 @@ export default function FeasibilityPage() {
         </div>
       </section>
 
-      <section className={`${styles.summaryBar} glassmorphism`}>
-        <span>Total Credits <strong>{activeCreditKeys.length}</strong></span>
+      <section className={`${styles.summaryBar} ${ratingStyle} glassmorphism`}>
         <span>Total Available Points <strong>{summary.available}</strong></span>
-        <span>Total Achievable / Targeted Points <strong>{summary.achievable}</strong></span>
+        <span>Total Targeted Points <strong>{summary.achievable}</strong></span>
         <span>Total Doubtful Points <strong>{summary.doubtful}</strong></span>
         <span>Total Not Targeted Points <strong>{summary.notTargeted}</strong></span>
-        <span>Rating <strong>{getRating(summary.achievable)}</strong></span>
+        <span>Rating <strong>{rating}</strong></span>
         {currentReviewResponse?.fileName && (
           <span
             className={styles.reviewFilePill}

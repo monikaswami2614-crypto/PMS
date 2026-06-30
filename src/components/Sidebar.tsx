@@ -10,7 +10,6 @@ import {
   ListTodo,
   Calendar,
   Users,
-  History,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -22,13 +21,13 @@ import styles from './Sidebar.module.css';
 const projectSources = [
   {
     id: 'nb',
-    label: 'NB Project',
+    label: 'NB Projects',
     sourceName: 'NB Project source',
     sourcePath: 'C:\\Users\\monika.swami\\Desktop\\Leed Project\\NB Projects',
   },
   {
     id: 'green-homes',
-    label: 'Green Homes',
+    label: 'GH Projects',
     sourceName: 'Green Homes source',
     sourcePath: 'C:\\Users\\monika.swami\\Desktop\\Leed Project\\Green Homes',
   },
@@ -47,12 +46,11 @@ export const Sidebar: React.FC = () => {
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Project Progress', path: '/board', icon: KanbanSquare },
     { name: 'All Project List', path: '/tasks', icon: ListTodo },
-    { name: 'Checklist Review', path: '/checklist-review', icon: ClipboardCheck },
-    { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
     { name: 'Feasibility', path: '/feasibility', icon: BadgeCheck },
+    { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
+    { name: 'Checklist Review', path: '/checklist-review', icon: ClipboardCheck },
     { name: 'Calendar', path: '/calendar', icon: Calendar },
     { name: 'Team Members', path: '/team', icon: Users },
-    { name: 'Activity Logs', path: '/activity-logs', icon: History },
   ];
 
   const handleOpenProjectManagement = (sourceName: string, sourcePath: string) => {
@@ -97,7 +95,7 @@ export const Sidebar: React.FC = () => {
       {/* Project Source Selector */}
       <div className={styles.projectSelectorSection}>
         {!isCollapsed && <label className={styles.selectorLabel}>Project Sources</label>}
-        <div className={styles.projectButtonGroup}>
+        <div className={`${styles.projectButtonGroup} ${styles.sourceButtonGroup}`}>
           {projectSources.map((source) => (
             <button
               key={source.id}

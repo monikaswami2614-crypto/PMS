@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Bell, Clock3, FolderPlus, History, Mail, Palette, Search, Plus, Settings, SlidersHorizontal, User, UserCheck, X } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Bell, Clock3, FolderPlus, History, Mail, Palette, Plus, Settings, SlidersHorizontal, Upload, User, UserCheck, X } from 'lucide-react';
 import { useProjects } from '@/context/ProjectContext';
 import CreateNewProjectModal from './CreateNewProjectModal';
 import styles from './Header.module.css';
@@ -52,20 +52,19 @@ export const Header: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [userProfile, setUserProfile] = useState({
     name: 'Sarah Jenkins',
-    email: 'sarah.j@kamalcogent.com',
+    email: '',
     designation: 'Product Manager',
     photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80',
   });
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const PROFILE_KEY = 'kamal-cogent-user-profile';
   const USER_ID_KEY = 'kamal-cogent-user-id';
   const SESSION_KEY = 'kamal-cogent-session';
@@ -147,7 +146,12 @@ export const Header: React.FC = () => {
 
     if (savedProfile) {
       try {
-        setUserProfile(JSON.parse(savedProfile));
+        const profile = JSON.parse(savedProfile) as Partial<typeof userProfile>;
+        setUserProfile((current) => ({
+          ...current,
+          ...profile,
+          email: '',
+        }));
       } catch {
         window.localStorage.removeItem(PROFILE_KEY);
       }
@@ -158,13 +162,23 @@ export const Header: React.FC = () => {
       }
     }
 
-    const savedSearch = searchParams?.get('search') ?? '';
-    if (savedSearch) {
-      setSearchQuery(savedSearch);
-    }
-
     setPreferencesLoaded(true);
-  }, [searchParams]);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const loginIdentity = window.localStorage.getItem(USER_ID_KEY)?.trim() ?? '';
+    const matchingMember = team.find((member) => (
+      member.email.toLowerCase() === loginIdentity.toLowerCase()
+      || member.name.toLowerCase() === loginIdentity.toLowerCase()
+    ));
+    const loginEmail = loginIdentity.includes('@') ? loginIdentity : matchingMember?.email ?? '';
+
+    setUserProfile((current) => (
+      current.email === loginEmail ? current : { ...current, email: loginEmail }
+    ));
+  }, [team]);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -174,16 +188,6 @@ export const Header: React.FC = () => {
     window.localStorage.setItem('pms-theme', theme);
     window.localStorage.setItem('pms-size', size);
   }, [preferencesLoaded, theme, size]);
-
-  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const query = searchQuery.trim();
-    if (!query) return;
-
-    const params = new URLSearchParams(searchParams as URLSearchParams);
-    params.set('search', query);
-    router.push(`${pathname}?${params.toString()}`);
-  };
 
   const handleNotificationDismiss = async (notificationId: string) => {
     const previousNotifications = notifications;
@@ -217,6 +221,20 @@ export const Header: React.FC = () => {
       window.dispatchEvent(new CustomEvent('kamal-cogent-profile-updated', { detail: profile }));
     }
     setShowProfileEditor(false);
+  };
+
+  const handleProfilePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setUserProfile((current) => ({ ...current, photo: reader.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   useEffect(() => {
@@ -285,21 +303,6 @@ export const Header: React.FC = () => {
           <Plus size={18} />
           <span>New Project</span>
         </button>
-
-        {/* Search Bar */}
-        <form className={styles.searchForm} onSubmit={handleSearchSubmit}>
-          <Search size={16} className={styles.searchIcon} />
-          <input
-            type="text"
-            placeholder="Search dashboard..."
-            className={styles.searchInput}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-          <button type="submit" className={styles.searchSubmit} aria-label="Search dashboard">
-            Search
-          </button>
-        </form>
 
         {/* Notifications */}
         <div className={styles.notificationWrapper} ref={notificationRef}>
@@ -449,12 +452,20 @@ export const Header: React.FC = () => {
               <div className={styles.profilePhotoRow}>
                 <img src={userProfile.photo} className={styles.profilePhotoPreview} alt="Profile preview" />
                 <input
-                  type="text"
-                  value={userProfile.photo}
-                  onChange={(event) => setUserProfile((current) => ({ ...current, photo: event.target.value }))}
-                  placeholder="Profile image URL"
-                  className={styles.profileInput}
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className={styles.hiddenPhotoInput}
+                  onChange={handleProfilePhotoUpload}
                 />
+                <button
+                  type="button"
+                  className={styles.uploadPhotoButton}
+                  onClick={() => photoInputRef.current?.click()}
+                >
+                  <Upload size={16} />
+                  <span>Upload photo</span>
+                </button>
               </div>
             </div>
 
@@ -479,8 +490,9 @@ export const Header: React.FC = () => {
                 id="profile-email"
                 type="email"
                 value={userProfile.email}
-                onChange={(event) => setUserProfile((current) => ({ ...current, email: event.target.value }))}
-                className={styles.profileInput}
+                readOnly
+                placeholder="No login email available"
+                className={`${styles.profileInput} ${styles.readOnlyInput}`}
               />
             </div>
 

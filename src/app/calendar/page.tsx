@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { DeadlineProjectType, getProjectSource, Project, useProjects, Task, TaskPriority, TaskStatus } from '@/context/ProjectContext';
 import { CalendarDays, ChevronLeft, ChevronRight, Layers, Mail, Plus, RefreshCw, Tag, Trash2, User, X } from 'lucide-react';
 import { logClientActivity } from '@/utils/activityLog';
@@ -27,6 +27,8 @@ type SheetDeadlineRow = {
 };
 
 const GOOGLE_SHEET_SYNC_URL = '/api/google-sheet-calendar';
+const CALENDAR_VIEW_DATE_KEY = 'pms-calendar-view-date';
+const TASKS_STORAGE_KEY = 'pms_tasks';
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
 
 const statusLabels: Record<DeadlineStatus, string> = {
@@ -57,6 +59,32 @@ const formatDisplayDate = (value: string) => {
 const parseDateOnly = (value: string) => {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, month - 1, day);
+};
+
+const getInitialCalendarDate = () => {
+  if (typeof window === 'undefined') return new Date();
+
+  const savedViewDate = window.localStorage.getItem(CALENDAR_VIEW_DATE_KEY);
+  if (savedViewDate) {
+    const parsedViewDate = parseDateOnly(savedViewDate);
+    if (!Number.isNaN(parsedViewDate.getTime())) return parsedViewDate;
+  }
+
+  try {
+    const storedTasks = window.localStorage.getItem(TASKS_STORAGE_KEY);
+    const syncedTask = storedTasks
+      ? (JSON.parse(storedTasks) as SyncedCalendarTask[])
+        .find((task) => task.sheetSyncKey && task.dueDate)
+      : undefined;
+    if (syncedTask) {
+      const syncedTaskDate = parseDateOnly(syncedTask.dueDate);
+      if (!Number.isNaN(syncedTaskDate.getTime())) return syncedTaskDate;
+    }
+  } catch {
+    // The shared task store owns recovery from malformed task data.
+  }
+
+  return new Date();
 };
 
 const parseSheetDate = (value: string): string | null => {
@@ -169,10 +197,21 @@ const getProjectTypeFromProject = (project?: Project): DeadlineProjectType | '' 
 };
 
 export default function CalendarPage() {
-  const { tasks, selectedProject, projects, team, addTask, updateTask, deleteTask, sourceFilter } = useProjects();
+  const {
+    tasks,
+    selectedProject,
+    setSelectedProject,
+    projects,
+    team,
+    addTask,
+    updateTask,
+    deleteTask,
+    sourceFilter,
+    setSourceFilter,
+  } = useProjects();
   
   // Calendar navigations
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(getInitialCalendarDate);
   const [selectedTask, setSelectedTask] = useState<Task | undefined>(undefined);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -193,6 +232,13 @@ export default function CalendarPage() {
   const currentMonth = currentDate.getMonth();
   const todayYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: todayYear - 2000 + 1 }, (_, index) => 2000 + index);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      CALENDAR_VIEW_DATE_KEY,
+      formatDateOnly(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)),
+    );
+  }, [currentDate]);
 
   // Get name of current month
   const monthNames = [
@@ -433,6 +479,8 @@ export default function CalendarPage() {
     setIsSyncingSheet(true);
     setSheetSyncMessage('');
     setSheetSyncError('');
+    setSelectedProject('all');
+    setSourceFilter(null);
 
     try {
       const response = await fetch(`${GOOGLE_SHEET_SYNC_URL}?cacheBust=${Date.now()}`, { cache: 'no-store' });
@@ -702,7 +750,7 @@ export default function CalendarPage() {
 
               {/* Due Tasks strips */}
               <div className={styles.cellTasks}>
-                {cellTasks.slice(0, 3).map((task) => (
+                {cellTasks.map((task) => (
                   (() => {
                     const assignee = team.find((member) => member.id === task.assigneeId);
                     const syncedTask = task as SyncedCalendarTask;
@@ -725,11 +773,6 @@ export default function CalendarPage() {
                     );
                   })()
                 ))}
-                {cellTasks.length > 3 && (
-                  <div className={styles.moreTasks}>
-                    +{cellTasks.length - 3} more
-                  </div>
-                )}
               </div>
             </div>
           );
