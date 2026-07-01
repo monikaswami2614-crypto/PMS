@@ -223,17 +223,6 @@ const getDeadlineAlerts = (
   return alerts;
 };
 
-const renderDataList = (title: string, items: string[]): string => `
-  <div style="margin-top:12px">
-    <strong>${escapeHtml(title)} (${items.length})</strong>
-    ${items.length === 0
-      ? '<span style="color:#64748b">: None</span>'
-      : `<ul style="margin:6px 0 0;padding-left:20px">${items
-        .map((item) => `<li style="margin:2px 0">${escapeHtml(item)}</li>`)
-        .join('')}</ul>`}
-  </div>
-`;
-
 const buildText = (date: string, totalProjects: number, reports: ProjectReport[]): string => {
   const updatedReports = reports.filter((report) => report.hasUpdates);
   const lines = [
@@ -282,13 +271,7 @@ const buildText = (date: string, totalProjects: number, reports: ProjectReport[]
       });
     }
 
-    lines.push(
-      '',
-      `Completed items: ${report.completedData.join('; ') || 'None'}`,
-      `Pending items: ${report.pendingData.join('; ') || 'None'}`,
-      `Missing items: ${report.missingData.join('; ') || 'None'}`,
-      '',
-    );
+    lines.push('');
   });
 
   return lines.join('\n');
@@ -391,9 +374,6 @@ const buildHtml = (date: string, totalProjects: number, reports: ProjectReport[]
             </table>
           ` : ''}
 
-          ${renderDataList('Completed data', report.completedData)}
-          ${renderDataList('Pending data', report.pendingData)}
-          ${renderDataList('Missing data', report.missingData)}
         </div>
       </section>
     `;
@@ -426,6 +406,7 @@ export const sendOwnerDailyProgressMail = async (now = new Date()): Promise<stri
         name: true,
         category: true,
         rootPath: true,
+        checklistStage: true,
         endDate: true,
         checklistStatuses: {
           select: {
@@ -494,7 +475,15 @@ export const sendOwnerDailyProgressMail = async (now = new Date()): Promise<stri
 
   const reports: ProjectReport[] = projects.map((project) => {
     const type = getProjectType(project);
-    const items = itemsByType.get(type) ?? [];
+    const activePhase: Exclude<ChecklistPhase, 'BOTH'> = project.checklistStage === 'FINAL_SUBMISSION'
+      ? 'FINAL'
+      : 'PRE';
+    const items = (itemsByType.get(type) ?? [])
+      .filter((item) => item.phase === activePhase || item.phase === 'BOTH')
+      .map((item) => ({
+        ...item,
+        phase: item.phase === 'BOTH' ? activePhase : item.phase,
+      }));
     const projectLogs = logsByProject.get(project.id) ?? [];
     const currentStates = new Map<string, ChecklistState>(
       project.checklistStatuses.map((status) => [status.checklistItemId, status]),

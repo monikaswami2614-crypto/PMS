@@ -5,7 +5,7 @@ const TIME_ZONE = 'Asia/Kolkata';
 let isRunning = false;
 
 export const startOwnerDailyProgressCron = (): void => {
-  cron.schedule('7 16 * * *', async () => {
+  cron.schedule('0 17 * * *', async () => {
     if (isRunning) {
       console.warn('[Owner daily progress cron] Previous run is still in progress; skipping this run.');
       return;
@@ -27,5 +27,5 @@ export const startOwnerDailyProgressCron = (): void => {
     timezone: TIME_ZONE,
   });
 
-  console.log('[Owner daily progress cron] Scheduled daily at 4:07 PM Asia/Kolkata.');
+  console.log('[Owner daily progress cron] Scheduled daily at 5:00 PM Asia/Kolkata.');
 };
