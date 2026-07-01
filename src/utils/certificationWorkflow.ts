@@ -5,7 +5,9 @@ export type WorkflowRequirementStatus = 'pending' | 'missing' | 'checked' | 'ove
 
 export const feasibilitySelectionChangeEvent = 'pms-feasibility-selection-change';
 export const checklistStatusChangeEvent = 'pms-checklist-status-change';
+export const submissionLifecycleChangeEvent = 'pms-submission-lifecycle-change';
 export const checklistStatusesStorageKey = 'pms-checklist-review-statuses-by-scope';
+export const submissionLifecycleStorageKey = 'pms-submission-lifecycle-by-scope';
 
 export const getCertificationScopeKey = (
   projectId: string,
@@ -25,6 +27,50 @@ export const getManualPointsScopeStorageKey = (scopeKey: string): string => (
 export const getReviewResponseScopeStorageKey = (scopeKey: string): string => (
   `feasibility_review_response_${scopeKey}`
 );
+
+export const getSubmissionLifecycleScopeKey = (
+  projectId: string,
+  checklistType: WorkflowChecklistType,
+  phase: CertificationPhase,
+): string => `${projectId}_${checklistType.toUpperCase()}_${phase}`;
+
+export type SubmissionLifecycle = {
+  reviewResponseUploaded: boolean;
+  firstSubmissionFrozen: boolean;
+};
+
+export type SubmissionLifecycleByScope = Record<string, SubmissionLifecycle>;
+
+export const readSubmissionLifecycles = (): SubmissionLifecycleByScope => {
+  try {
+    const stored = window.localStorage.getItem(submissionLifecycleStorageKey);
+    return stored ? JSON.parse(stored) as SubmissionLifecycleByScope : {};
+  } catch {
+    window.localStorage.removeItem(submissionLifecycleStorageKey);
+    return {};
+  }
+};
+
+export const updateSubmissionLifecycle = (
+  scopeKey: string,
+  updates: Partial<SubmissionLifecycle>,
+): SubmissionLifecycleByScope => {
+  const current = readSubmissionLifecycles();
+  const next = {
+    ...current,
+    [scopeKey]: {
+      reviewResponseUploaded: updates.reviewResponseUploaded
+        ?? current[scopeKey]?.reviewResponseUploaded
+        ?? false,
+      firstSubmissionFrozen: updates.firstSubmissionFrozen
+        ?? current[scopeKey]?.firstSubmissionFrozen
+        ?? false,
+    },
+  };
+  window.localStorage.setItem(submissionLifecycleStorageKey, JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent(submissionLifecycleChangeEvent));
+  return next;
+};
 
 export type ChecklistStatusesByScope = Record<string, Record<string, WorkflowRequirementStatus>>;
 

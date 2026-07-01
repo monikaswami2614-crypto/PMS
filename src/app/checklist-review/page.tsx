@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, Save, Trash2, X } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, Edit3, ExternalLink, FileText, Loader2, LockKeyhole, Save, Trash2, X } from 'lucide-react';
 import { getProjectSource, useProjects } from '@/context/ProjectContext';
 import { logClientActivity } from '@/utils/activityLog';
 import {
@@ -10,7 +10,12 @@ import {
   feasibilitySelectionChangeEvent,
   getCertificationScopeKey,
   getSelectedCreditsScopeStorageKey,
+  getSubmissionLifecycleScopeKey,
   readChecklistStatuses,
+  readSubmissionLifecycles,
+  SubmissionLifecycleByScope,
+  submissionLifecycleChangeEvent,
+  updateSubmissionLifecycle,
   updateChecklistStatusesForScope,
 } from '@/utils/certificationWorkflow';
 import ClientMailButton from '@/components/ClientMailButton';
@@ -128,6 +133,19 @@ const subscribeToSelectedProject = (onStoreChange: () => void) => {
 
 const getSelectedProjectSnapshot = () => window.localStorage.getItem(selectedProjectStorageKey) ?? '';
 const statusOptions: RequirementStatus[] = ['pending', 'missing', 'checked', 'overridden'];
+const normalizeCreditKey = (value: string): string => (
+  (value
+    .toLowerCase()
+    .replace(/\bmandatory\s+requirements?\b/g, 'mr')
+    .replace(/\bcredits?\b/g, 'cr')
+    .match(/[a-z]+|\d+/g) ?? [])
+    .map((token) => {
+      if (token === 'rwh') return 'rhw';
+      if (token === 'mandatory' || token === 'requirement' || token === 'requirements') return 'mr';
+      return token;
+    })
+    .join('')
+);
 const emptySheets: Record<FiltrationPhase, SheetFile[]> = { pre: [], final: [] };
 const fileTypeOrder: Record<string, number> = {
   pdf: 0,
@@ -202,6 +220,11 @@ export default function ChecklistReviewPage() {
   const [reviewCycle, setReviewCycle] = useState<FiltrationPhase>('pre');
   const [workflowStatuses, setWorkflowStatuses] = useState<ChecklistStatusesByScope>({});
   const [visibleFeasibilityCredits, setVisibleFeasibilityCredits] = useState<Record<string, boolean>>({});
+  const [selectedCreditsBySubmission, setSelectedCreditsBySubmission] = useState<Record<'first' | 'second', Record<string, boolean>>>({
+    first: {},
+    second: {},
+  });
+  const [submissionLifecycles, setSubmissionLifecycles] = useState<SubmissionLifecycleByScope>({});
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -212,12 +235,18 @@ export default function ChecklistReviewPage() {
     if (storedCycle === 'pre' || storedCycle === 'final') setReviewCycle(storedCycle);
 
     const loadWorkflowStatuses = () => setWorkflowStatuses(readChecklistStatuses());
+    const loadSubmissionLifecycles = () => setSubmissionLifecycles(readSubmissionLifecycles());
     loadWorkflowStatuses();
+    loadSubmissionLifecycles();
     window.addEventListener('storage', loadWorkflowStatuses);
+    window.addEventListener('storage', loadSubmissionLifecycles);
     window.addEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+    window.addEventListener(submissionLifecycleChangeEvent, loadSubmissionLifecycles);
     return () => {
       window.removeEventListener('storage', loadWorkflowStatuses);
+      window.removeEventListener('storage', loadSubmissionLifecycles);
       window.removeEventListener(checklistStatusChangeEvent, loadWorkflowStatuses);
+      window.removeEventListener(submissionLifecycleChangeEvent, loadSubmissionLifecycles);
     };
   }, []);
 
@@ -290,15 +319,26 @@ export default function ChecklistReviewPage() {
   const selectedProject = reviewProjects.find((project) => project.id === effectiveSelectedProjectId);
   const inferredType = selectedProject ? getProjectSource(selectedProject) : null;
   const reviewChecklistType = (review?.project.type === 'GH' || inferredType === 'GREEN_HOMES') ? 'gh' : 'nb';
+  const lifecycleScopeKey = effectiveSelectedProjectId
+    ? getSubmissionLifecycleScopeKey(effectiveSelectedProjectId, reviewChecklistType, reviewCycle)
+    : '';
+  const currentLifecycle = submissionLifecycles[lifecycleScopeKey];
+  const firstSubmissionFrozen = Boolean(currentLifecycle?.firstSubmissionFrozen);
+  const secondSubmissionUnlocked = Boolean(currentLifecycle?.reviewResponseUploaded);
 
   useEffect(() => {
     const loadVisibleFeasibilityCredits = () => {
       if (!effectiveSelectedProjectId) {
         setVisibleFeasibilityCredits({});
+        setSelectedCreditsBySubmission({ first: {}, second: {} });
         return;
       }
 
       const selections: Record<string, boolean> = {};
+      const selectionsBySubmission: Record<'first' | 'second', Record<string, boolean>> = {
+        first: {},
+        second: {},
+      };
       (['first', 'second'] as const).forEach((submissionRound) => {
         const scopeKey = getCertificationScopeKey(
           effectiveSelectedProjectId,
@@ -309,6 +349,7 @@ export default function ChecklistReviewPage() {
         try {
           const stored = window.localStorage.getItem(getSelectedCreditsScopeStorageKey(scopeKey));
           const parsed = stored ? JSON.parse(stored) as Record<string, boolean> : {};
+          selectionsBySubmission[submissionRound] = parsed;
           Object.entries(parsed).forEach(([creditKey, selected]) => {
             if (selected) selections[creditKey] = true;
           });
@@ -317,6 +358,7 @@ export default function ChecklistReviewPage() {
         }
       });
       setVisibleFeasibilityCredits(selections);
+      setSelectedCreditsBySubmission(selectionsBySubmission);
     };
 
     loadVisibleFeasibilityCredits();
@@ -332,20 +374,6 @@ export default function ChecklistReviewPage() {
     const selectedKeys = Object.keys(visibleFeasibilityCredits);
     if (selectedKeys.length === 0) return [];
 
-    const normalizeCreditKey = (value: string): string => (
-      (value
-        .toLowerCase()
-        .replace(/\bmandatory\s+requirements?\b/g, 'mr')
-        .replace(/\bcredits?\b/g, 'cr')
-        .match(/[a-z]+|\d+/g) ?? [])
-        .map((token) => {
-          if (token === 'rwh') return 'rhw';
-          if (token === 'mandatory' || token === 'requirement' || token === 'requirements') return 'mr';
-          return token;
-        })
-        .join('')
-    );
-
     return (review?.items ?? []).filter((item) => {
       const itemKeys = [
         normalizeCreditKey(item.creditName),
@@ -356,6 +384,33 @@ export default function ChecklistReviewPage() {
       ));
     });
   }, [review, visibleFeasibilityCredits]);
+
+  const selectedRequirementIdsBySubmission = useMemo(() => {
+    const getRequirementIds = (submission: 'first' | 'second') => {
+      const selectedKeys = Object.entries(selectedCreditsBySubmission[submission])
+        .filter(([, selected]) => selected)
+        .map(([creditKey]) => creditKey);
+      const ids = new Set<string>();
+      (review?.items ?? []).forEach((item) => {
+        const itemKeys = [
+          normalizeCreditKey(item.creditName),
+          normalizeCreditKey(`${item.creditName} ${item.subCreditName}`),
+        ];
+        const selected = selectedKeys.some((selectedKey) => (
+          itemKeys.some((itemKey) => itemKey === selectedKey || itemKey.endsWith(selectedKey) || selectedKey.endsWith(itemKey))
+        ));
+        if (!selected) return;
+        const requirements = reviewCycle === 'pre' ? item.preRequirements : item.finalRequirements;
+        requirements.forEach((requirement) => ids.add(requirement.id));
+      });
+      return ids;
+    };
+
+    return {
+      first: getRequirementIds('first'),
+      second: getRequirementIds('second'),
+    };
+  }, [review, reviewCycle, selectedCreditsBySubmission]);
 
   const preRequirements = review?.items.flatMap((item) => item.preRequirements) ?? [];
   const finalRequirements = review?.items.flatMap((item) => item.finalRequirements) ?? [];
@@ -421,6 +476,7 @@ export default function ChecklistReviewPage() {
 
   const updateRequirementStatus = async (requirementId: string, phase: 'pre' | 'final', status: RequirementStatus) => {
     if (!review) return;
+    if (!isRequirementEditable(requirementId, 1)) return;
 
     const previousReview = review;
     const collectionKey = phase === 'pre' ? 'preRequirements' : 'finalRequirements';
@@ -813,9 +869,20 @@ export default function ChecklistReviewPage() {
     requirement: RequirementPoint,
     phase: FiltrationPhase,
     submission: SubmissionNumber,
-  ): RequirementStatus => (
-    workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
-      ?? (submission === 1 ? requirement.status : 'pending')
+  ): RequirementStatus => {
+    if (submission === 2 && (
+      !secondSubmissionUnlocked
+      || !selectedRequirementIdsBySubmission.second.has(requirement.id)
+    )) return 'missing';
+    if (submission === 1 && !selectedRequirementIdsBySubmission.first.has(requirement.id)) return 'missing';
+    return workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
+      ?? (submission === 1 ? requirement.status : 'pending');
+  };
+
+  const isRequirementEditable = (requirementId: string, submission: SubmissionNumber) => (
+    submission === 1
+      ? !firstSubmissionFrozen && selectedRequirementIdsBySubmission.first.has(requirementId)
+      : secondSubmissionUnlocked && selectedRequirementIdsBySubmission.second.has(requirementId)
   );
 
   const updateSecondSubmissionStatus = (
@@ -823,6 +890,7 @@ export default function ChecklistReviewPage() {
     phase: FiltrationPhase,
     status: RequirementStatus,
   ) => {
+    if (!isRequirementEditable(requirementId, 2)) return;
     const scopeKey = getReviewScopeKey(phase, 2);
     setWorkflowStatuses(updateChecklistStatusesForScope(scopeKey, { [requirementId]: status }));
     logChecklistActivity(
@@ -842,6 +910,7 @@ export default function ChecklistReviewPage() {
   ) => {
     const status = getSubmissionStatus(requirement, phase, submission);
     const saving = submission === 1 && savingKey === `${requirement.id}-${phase}`;
+    const editable = isRequirementEditable(requirement.id, submission);
 
     return (
       <div className={styles.statusControl}>
@@ -856,7 +925,12 @@ export default function ChecklistReviewPage() {
             }
           }}
           className={`${styles.statusSelect} ${styles[`status-${status}`]}`}
-          disabled={saving}
+          disabled={saving || !editable}
+          title={!editable
+            ? submission === 1
+              ? '1st Submission is frozen'
+              : 'Upload review response file to unlock this action-required credit'
+            : undefined}
           aria-label={`${phase === 'pre' ? 'Pre' : 'Final'} submission ${submission} requirement status`}
         >
           {statusOptions.map((option) => (
@@ -1017,6 +1091,46 @@ export default function ChecklistReviewPage() {
     : [];
   const stagedKeys = new Set([...currentSupportingFiles, ...currentFinalFiles].map((file) => file.clientId));
   const availableFiltrationFiles = sortFilesForDisplay(currentGroupFiles.filter((file) => !stagedKeys.has(file.clientId) && !hiddenFiltrationFiles[file.clientId]));
+  const displayedRequirements = visibleReviewItems.flatMap((item) => (
+    reviewCycle === 'pre' ? item.preRequirements : item.finalRequirements
+  ));
+  const firstSubmissionRequirements = displayedRequirements.filter((requirement) => (
+    selectedRequirementIdsBySubmission.first.has(requirement.id)
+  ));
+  const getSubmissionCounts = (
+    submission: SubmissionNumber,
+    requirements: RequirementPoint[],
+  ) => requirements.reduce(
+    (counts, requirement) => {
+      const status = getSubmissionStatus(requirement, reviewCycle, submission);
+      if (status === 'checked' || status === 'overridden') counts.checked += 1;
+      else if (status === 'missing') counts.missing += 1;
+      else counts.pending += 1;
+      return counts;
+    },
+    { checked: 0, pending: 0, missing: 0 },
+  );
+  const firstSubmissionCounts = getSubmissionCounts(1, firstSubmissionRequirements);
+  const secondSubmissionCounts = getSubmissionCounts(2, displayedRequirements);
+
+  useEffect(() => {
+    if (
+      !lifecycleScopeKey
+      || firstSubmissionFrozen
+      || firstSubmissionRequirements.length === 0
+      || firstSubmissionCounts.pending > 0
+      || firstSubmissionCounts.missing > 0
+    ) return;
+    setSubmissionLifecycles(updateSubmissionLifecycle(lifecycleScopeKey, {
+      firstSubmissionFrozen: true,
+    }));
+  }, [
+    firstSubmissionCounts.missing,
+    firstSubmissionCounts.pending,
+    firstSubmissionFrozen,
+    firstSubmissionRequirements.length,
+    lifecycleScopeKey,
+  ]);
 
   return (
     <div className={styles.container}>
@@ -1063,6 +1177,40 @@ export default function ChecklistReviewPage() {
           <span className={styles.summaryPill}>Final {completedFinal}/{finalRequirements.length}</span>
         </div>
       </div>
+
+      <section className={`${styles.submissionStatsBar} glassmorphism`} aria-label="Submission status counts">
+        <div className={styles.submissionStatsGroup}>
+          <strong>
+            1st Submission
+            {firstSubmissionFrozen && (
+              <span className={styles.lifecycleLock}><LockKeyhole size={12} /> Frozen</span>
+            )}
+          </strong>
+          <span className={`${styles.submissionStat} ${styles.checkedStat}`}>
+            Checked <b>{firstSubmissionCounts.checked}</b>
+          </span>
+          <span className={`${styles.submissionStat} ${styles.missingStat}`}>
+            Missing <b>{firstSubmissionCounts.missing}</b>
+          </span>
+        </div>
+        <div className={styles.submissionStatsGroup}>
+          <strong>
+            2nd Submission
+            {!secondSubmissionUnlocked && (
+              <span className={styles.lifecycleLock}><LockKeyhole size={12} /> Locked</span>
+            )}
+          </strong>
+          <span className={`${styles.submissionStat} ${styles.checkedStat}`}>
+            Checked <b>{secondSubmissionCounts.checked}</b>
+          </span>
+          <span className={`${styles.submissionStat} ${styles.pendingStat}`}>
+            Pending <b>{secondSubmissionCounts.pending}</b>
+          </span>
+          <span className={`${styles.submissionStat} ${styles.missingStat}`}>
+            Missing <b>{secondSubmissionCounts.missing}</b>
+          </span>
+        </div>
+      </section>
 
       {error && <div className={styles.errorBox}>{error}</div>}
 

@@ -7,7 +7,11 @@ import {
   feasibilitySelectionChangeEvent,
   getCertificationScopeKey,
   getSelectedCreditsScopeStorageKey,
+  getSubmissionLifecycleScopeKey,
   readChecklistStatuses,
+  readSubmissionLifecycles,
+  SubmissionLifecycleByScope,
+  submissionLifecycleChangeEvent,
   updateChecklistStatusesForScope,
 } from '@/utils/certificationWorkflow';
 import ClientMailButton from '@/components/ClientMailButton';
@@ -234,6 +238,7 @@ export default function CertificationFiltrationPage() {
   const [isSavingProjectFiles, setIsSavingProjectFiles] = useState(false);
   const [projectSaveMessage, setProjectSaveMessage] = useState('');
   const [projectSaveError, setProjectSaveError] = useState('');
+  const [submissionLifecycles, setSubmissionLifecycles] = useState<SubmissionLifecycleByScope>({});
 
   const effectiveSelectedProjectId = reviewProjects.some((project) => project.id === selectedProjectId)
     ? selectedProjectId
@@ -244,9 +249,25 @@ export default function CertificationFiltrationPage() {
   const certificationScopeKey = effectiveSelectedProjectId
     ? getCertificationScopeKey(effectiveSelectedProjectId, filtrationChecklistType, phase, submissionMode)
     : '';
+  const lifecycleScopeKey = effectiveSelectedProjectId
+    ? getSubmissionLifecycleScopeKey(effectiveSelectedProjectId, filtrationChecklistType, phase)
+    : '';
+  const secondSubmissionUnlocked = Boolean(submissionLifecycles[lifecycleScopeKey]?.reviewResponseUploaded);
+  const firstSubmissionFrozen = Boolean(submissionLifecycles[lifecycleScopeKey]?.firstSubmissionFrozen);
   const workflowFilesStorageKey = effectiveSelectedProjectId
     ? `${workflowFilesStoragePrefix}:${effectiveSelectedProjectId}:${phase}:${submissionMode}`
     : '';
+
+  useEffect(() => {
+    const loadSubmissionLifecycles = () => setSubmissionLifecycles(readSubmissionLifecycles());
+    loadSubmissionLifecycles();
+    window.addEventListener('storage', loadSubmissionLifecycles);
+    window.addEventListener(submissionLifecycleChangeEvent, loadSubmissionLifecycles);
+    return () => {
+      window.removeEventListener('storage', loadSubmissionLifecycles);
+      window.removeEventListener(submissionLifecycleChangeEvent, loadSubmissionLifecycles);
+    };
+  }, []);
 
   useEffect(() => {
     if (!workflowFilesStorageKey) return;
@@ -618,6 +639,7 @@ export default function CertificationFiltrationPage() {
   );
 
   const visibleGroups = (() => {
+    if (submissionMode === 'second' && !secondSubmissionUnlocked) return [];
     const query = creditSearch.trim().toLowerCase();
     const groups = filtrationData?.groups ?? [];
     const activeSelectedCreditKeys = Object.entries(selectedFeasibilityCredits)
@@ -849,6 +871,7 @@ export default function CertificationFiltrationPage() {
 
   useEffect(() => {
     if (!certificationScopeKey || !filtrationData) return;
+    if (submissionMode === 'first' && firstSubmissionFrozen) return;
 
     const currentStatuses = readChecklistStatuses()[certificationScopeKey] ?? {};
     const selectedCreditKeys = Object.entries(selectedFeasibilityCredits)
@@ -886,7 +909,9 @@ export default function CertificationFiltrationPage() {
     clientFiltrationFiles,
     filtrationData,
     finalFiles,
+    firstSubmissionFrozen,
     selectedFeasibilityCredits,
+    submissionMode,
     supportingFiles,
   ]);
 
@@ -895,6 +920,8 @@ export default function CertificationFiltrationPage() {
     selectionKey: string,
     checked: boolean
   ) => {
+    if (submissionMode === 'first' && firstSubmissionFrozen) return;
+    if (submissionMode === 'second' && !secondSubmissionUnlocked) return;
     const previousValue = Object.prototype.hasOwnProperty.call(manuallyCheckedRequirementIds, selectionKey)
       ? manuallyCheckedRequirementIds[selectionKey]
       : requirement.status === 'overridden';
@@ -1318,6 +1345,11 @@ export default function CertificationFiltrationPage() {
                       <input
                         type="checkbox"
                         checked={isMatched || isManuallyChecked}
+                        disabled={
+                          isMatched
+                          || (submissionMode === 'first' && firstSubmissionFrozen)
+                          || (submissionMode === 'second' && !secondSubmissionUnlocked)
+                        }
                         onChange={(event) => {
                           if (isMatched) return;
                           updateManualRequirementOverride(requirement, selectionKey, event.target.checked);
@@ -1580,7 +1612,7 @@ export default function CertificationFiltrationPage() {
               type="button"
               className={styles.saveSheetButton}
               onClick={() => void saveAllFiltrationFiles()}
-              disabled={isLoading || isSavingProjectFiles || !filtrationData}
+              disabled={isLoading || isSavingProjectFiles || !filtrationData || (submissionMode === 'second' && !secondSubmissionUnlocked)}
               title="Save all Supporting Document and IGBC submission files in the project"
             >
               {isSavingProjectFiles ? <Loader2 size={15} className="loading-icon" /> : <Save size={15} />}
@@ -1693,8 +1725,12 @@ export default function CertificationFiltrationPage() {
             {visibleGroups.length === 0 && (
               <div className={styles.emptyState}>
                 <Search size={34} />
-                <h3>No credits match your search</h3>
-                <p>Search by credit ID or credit name.</p>
+                <h3>{submissionMode === 'second' && !secondSubmissionUnlocked
+                  ? '2nd Submission locked'
+                  : 'No credits match your search'}</h3>
+                <p>{submissionMode === 'second' && !secondSubmissionUnlocked
+                  ? 'Upload review response file to start 2nd submission.'
+                  : 'Search by credit ID or credit name.'}</p>
               </div>
             )}
           </div>
@@ -1717,7 +1753,12 @@ export default function CertificationFiltrationPage() {
             <button
               type="button"
               className={styles.clientMoveButton}
-              disabled={selectedClientFileCount === 0 || !filtrationData?.groups.length || (creditViewMode === 'stepwise' && visibleGroups.length === 0)}
+              disabled={
+                selectedClientFileCount === 0
+                || !filtrationData?.groups.length
+                || (submissionMode === 'second' && !secondSubmissionUnlocked)
+                || (creditViewMode === 'stepwise' && visibleGroups.length === 0)
+              }
               onClick={moveSelectedClientFiles}
             >
               Move Selected ({selectedClientFileCount})

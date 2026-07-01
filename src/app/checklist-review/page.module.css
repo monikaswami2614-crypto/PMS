@@ -8,8 +8,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
+  gap: 10px;
+  padding: 10px 12px;
   flex-wrap: wrap;
 }
 
@@ -19,7 +19,7 @@
   align-items: center;
   min-width: 280px;
   flex: 1;
-  max-width: 520px;
+  max-width: 440px;
 }
 
 .toolbarIcon {
@@ -31,8 +31,8 @@
 
 .projectSelect {
   width: 100%;
-  min-height: 40px;
-  padding: 9px 36px 9px 40px;
+  min-height: 34px;
+  padding: 7px 34px 7px 38px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   background-color: var(--input-bg);
@@ -56,9 +56,9 @@
 }
 
 .submissionSelect {
-  min-width: 190px;
-  min-height: 40px;
-  padding: 9px 36px 9px 12px;
+  min-width: 170px;
+  min-height: 34px;
+  padding: 7px 34px 7px 11px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   background-color: var(--input-bg);
@@ -92,8 +92,8 @@
 .summaryPill {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 7px 11px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-sm);
   background: rgba(var(--surface-rgb), 0.52);
@@ -101,6 +101,79 @@
   font-size: 0.8rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.submissionStatsBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.submissionStatsGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.submissionStatsGroup > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 2px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.lifecycleLock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.submissionStat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.submissionStat b {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.checkedStat {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.pendingStat {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+}
+
+.missingStat {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fb7185;
 }
 
 .certificationToolbar {
@@ -1735,6 +1808,15 @@
 
   .summaryGroup {
     justify-content: space-between;
+  }
+
+  .submissionStatsBar,
+  .submissionStatsGroup {
+    align-items: stretch;
+  }
+
+  .submissionStatsGroup {
+    width: 100%;
   }
 
   .certificationToolbar {
