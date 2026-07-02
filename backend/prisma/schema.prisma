@@ -42,6 +42,7 @@ model Project {
   checklistStatuses              ProjectChecklistStatus[]
   certificationValidationResults CertificationValidationResult[]
   certificationStatuses          ProjectCertificationStatus[]
+  finalAwardResponses             FinalAwardResponse[]
   activityLogs                   ActivityLog[]
   createdAt                      DateTime                        @default(now())
   updatedAt                      DateTime                        @updatedAt
@@ -252,6 +253,23 @@ model EmailLog {
   @@index([projectName])
   @@index([deliveryStatus])
   @@index([createdAt])
+}
+
+model FinalAwardResponse {
+  id            String             @id @default(cuid())
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId     String
+  checklistType ChecklistType
+  phase         CertificationPhase
+  fileName      String
+  mimeType      String?
+  fileData      Bytes
+  parsedRows    Json
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([projectId, checklistType, phase])
+  @@index([projectId])
 }
 
 enum ValidationType {

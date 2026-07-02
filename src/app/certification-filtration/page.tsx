@@ -866,7 +866,7 @@ export default function CertificationFiltrationPage() {
     const submissionFiles = getSubmissionFiles(group);
     if (group.requirements.length > 0 && group.requirements.every((requirement) => isRequirementSatisfied(requirement, submissionFiles))) return 'checked';
     if (group.requirements.some((requirement) => isRequirementSatisfied(requirement, submissionFiles))) return 'pending';
-    return 'missing';
+    return submissionMode === 'second' ? 'pending' : 'missing';
   };
 
   useEffect(() => {
@@ -897,7 +897,9 @@ export default function CertificationFiltrationPage() {
         }
         return [
           requirement.id,
-          isRequirementSatisfied(requirement, workflowMatchedFiles) ? 'checked' : 'missing',
+          isRequirementSatisfied(requirement, workflowMatchedFiles)
+            ? 'checked'
+            : submissionMode === 'second' ? 'pending' : 'missing',
         ] as const;
       });
     }));
@@ -927,7 +929,9 @@ export default function CertificationFiltrationPage() {
       : requirement.status === 'overridden';
 
     setManuallyCheckedRequirementIds((current) => ({ ...current, [selectionKey]: checked }));
-    const nextStatus: RequirementStatus = checked ? 'overridden' : 'missing';
+    const nextStatus: RequirementStatus = checked
+      ? 'overridden'
+      : submissionMode === 'second' ? 'pending' : 'missing';
     if (certificationScopeKey) {
       updateChecklistStatusesForScope(certificationScopeKey, { [requirement.id]: nextStatus });
     }

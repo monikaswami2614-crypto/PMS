@@ -384,7 +384,7 @@ export default function ChecklistReviewPage() {
     const getRequirementIds = (submission: 'first' | 'second') => {
       const selectedKeys = Object.entries(selectedCreditsBySubmission[submission])
         .filter(([, selected]) => selected)
-        .map(([creditKey]) => creditKey);
+        .map(([creditKey]) => normalizeCreditKey(creditKey));
       const ids = new Set<string>();
       (review?.items ?? []).forEach((item) => {
         const itemKeys = [
@@ -872,6 +872,7 @@ export default function ChecklistReviewPage() {
     if (submission === 1 && !selectedRequirementIdsBySubmission.first.has(requirement.id)) return 'missing';
     const status = workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
       ?? (submission === 1 ? requirement.status : 'pending');
+    if (submission === 2 && status === 'missing') return 'pending';
     return submission === 1 && status === 'pending' ? 'missing' : status;
   };
 

@@ -156,6 +156,10 @@
   padding: 16px;
 }
 
+.expandedProjectCard {
+  grid-column: span 2;
+}
+
 .compactCard {
   min-height: 126px;
 }
@@ -190,7 +194,7 @@
 }
 
 .ratingPlatinum {
-  --rating-rgb: 103, 232, 249;
+  --rating-rgb: 168, 85, 247;
 }
 
 .ratingCertified,
@@ -333,6 +337,54 @@
   flex-wrap: wrap;
 }
 
+.awardUploadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-left: auto;
+  padding: 5px 9px;
+  border: 1px solid rgba(139, 92, 246, 0.42);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  background: rgba(124, 58, 237, 0.14);
+  font-size: 0.7rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.awardUploadButton:hover {
+  border-color: rgba(139, 92, 246, 0.7);
+  background: rgba(124, 58, 237, 0.22);
+}
+
+.awardUploadButton input {
+  display: none;
+}
+
+.awardStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.awardStatus span {
+  color: var(--text-primary);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.awardStatus small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .activeProgressTab {
   color: var(--text-primary);
   border-color: rgba(139, 92, 246, 0.48);
@@ -362,8 +414,9 @@
 
 .submissionProgressGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr);
   gap: 10px;
+  align-items: stretch;
 }
 
 .submissionProgressColumn {
@@ -382,6 +435,51 @@
 .submissionProgressColumn .categoryProgressList {
   height: 100%;
   padding: 8px;
+}
+
+.pendingCreditsSummary {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 14px 8px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  background: rgba(245, 158, 11, 0.07);
+  text-align: center;
+}
+
+.pendingCreditsSummary span {
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pendingCreditsSummary strong {
+  color: #fbbf24;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.pendingCreditsSummary small,
+.pendingCreditsSummary button {
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.pendingCreditsSummary button {
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.pendingCreditsSummary button:hover {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .categoryProgressList {
@@ -533,6 +631,76 @@
   overflow: hidden;
 }
 
+.pendingListModal {
+  width: min(820px, 100%);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modalHeader p {
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.pendingRequirementList {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
+.pendingRequirementRow {
+  display: grid;
+  grid-template-columns: minmax(135px, 0.7fr) minmax(240px, 2fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background: rgba(var(--contrast-surface-rgb), 0.025);
+}
+
+.pendingRequirementRow > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pendingRequirementRow strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.pendingRequirementRow > div span,
+.pendingRequirementRow p {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.completedCreditStatus,
+.remainingCreditStatus {
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.completedCreditStatus {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.remainingCreditStatus {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.12);
+}
+
 .modalHeader {
   display: flex;
   align-items: center;
@@ -663,6 +831,27 @@
   .newProjectGrid,
   .stageGrid {
     grid-template-columns: 1fr;
+  }
+
+  .expandedProjectCard {
+    grid-column: span 1;
+  }
+
+  .submissionProgressGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pendingCreditsSummary {
+    width: 100%;
+  }
+
+  .pendingRequirementRow {
+    grid-template-columns: 1fr;
+  }
+
+  .completedCreditStatus,
+  .remainingCreditStatus {
+    width: fit-content;
   }
 
   .fileRow {

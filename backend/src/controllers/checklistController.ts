@@ -235,11 +235,19 @@ const extractPdfReviewResponseRows = async (body: Buffer): Promise<string[][]> =
           width: item.width,
         }];
       });
+      const firstResponseHeader = items.find((item) => (
+        ['expected', 'awarded'].includes(normalizeHeader(item.text))
+      ));
       const statusHeaders = (['expected', 'pending', 'denied'] as const).map((status) => {
-        const header = items.find((item) => normalizeHeader(item.text) === status);
+        const header = status === 'expected'
+          ? firstResponseHeader
+          : items.find((item) => normalizeHeader(item.text) === status);
         return header ? { status, x: header.x - 6 } : null;
       });
       if (statusHeaders.some((header) => header === null)) continue;
+      if (firstResponseHeader && normalizeHeader(firstResponseHeader.text) === 'awarded') {
+        rows[0][0] = 'Awarded';
+      }
 
       const headers = statusHeaders.filter((header): header is NonNullable<typeof header> => Boolean(header));
       const sortedHeaderXs = headers.map((header) => header.x).sort((first, second) => first - second);
@@ -1079,6 +1087,26 @@ export const getChecklistTree = async (req: Request, res: Response): Promise<voi
   }
 };
 
+const parseResponseFileRows = async (body: Buffer, fileName: string): Promise<string[][]> => {
+  const normalizedFileName = fileName.toLowerCase();
+  if (normalizedFileName.endsWith('.doc') || normalizedFileName.endsWith('.docx')) {
+    throw new Error('Word extraction is not available yet. Please upload Excel, CSV, or PDF.');
+  }
+
+  if (normalizedFileName.endsWith('.pdf')) {
+    return extractPdfReviewResponseRows(body);
+  }
+
+  const workbook = normalizedFileName.endsWith('.csv') || normalizedFileName.endsWith('.txt')
+    ? XLSX.read(body.toString('utf8'), { type: 'string' })
+    : XLSX.read(body, { type: 'buffer' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
+  return rows
+    .map((row) => row.map((cell) => String(cell ?? '').trim()))
+    .filter((row) => row.some(Boolean));
+};
+
 export const parseReviewResponseFile = async (req: Request, res: Response): Promise<void> => {
   try {
     const body = req.body as Buffer;
@@ -1087,33 +1115,119 @@ export const parseReviewResponseFile = async (req: Request, res: Response): Prom
       return;
     }
 
-    const fileName = String(req.query.fileName ?? '').toLowerCase();
-    if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) {
-      res.status(400).json({ error: 'Word extraction is not available yet. Please upload Excel, CSV, or PDF.' });
-      return;
-    }
-
-    if (fileName.endsWith('.pdf')) {
-      const rows = await extractPdfReviewResponseRows(body);
-      res.json({
-        message: 'PDF review response columns parsed successfully',
-        data: rows,
-      });
-      return;
-    }
-
-    const workbook = fileName.endsWith('.csv') || fileName.endsWith('.txt')
-      ? XLSX.read(body.toString('utf8'), { type: 'string' })
-      : XLSX.read(body, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: '' });
-
+    const fileName = String(req.query.fileName ?? '');
+    const rows = await parseResponseFileRows(body, fileName);
     res.json({
       message: 'Review response parsed successfully',
-      data: rows.map((row) => row.map((cell) => String(cell ?? '').trim())).filter((row) => row.some(Boolean)),
+      data: rows,
     });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to parse review response file' });
+  }
+};
+
+export const saveFinalAwardResponse = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const body = req.body as Buffer;
+    const projectId = req.params.projectId;
+    const fileName = String(req.query.fileName ?? '').trim();
+    const checklistType = String(req.query.checklistType ?? '').toUpperCase();
+    const phase = String(req.query.phase ?? '').toUpperCase();
+
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: 'Final Award Response file is required' });
+      return;
+    }
+    if (!fileName || !['NB', 'GH'].includes(checklistType) || !['PRE', 'FINAL'].includes(phase)) {
+      res.status(400).json({ error: 'fileName, checklistType (NB/GH), and phase (PRE/FINAL) are required' });
+      return;
+    }
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, name: true, category: true, rootPath: true },
+    });
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    if (getChecklistTypeFromProject(project) !== checklistType) {
+      res.status(400).json({ error: 'Checklist type does not match the selected project' });
+      return;
+    }
+
+    const rows = await parseResponseFileRows(body, fileName);
+    const saved = await prisma.finalAwardResponse.upsert({
+      where: {
+        projectId_checklistType_phase: {
+          projectId,
+          checklistType: checklistType as ChecklistType,
+          phase: phase as 'PRE' | 'FINAL',
+        },
+      },
+      create: {
+        projectId,
+        checklistType: checklistType as ChecklistType,
+        phase: phase as 'PRE' | 'FINAL',
+        fileName,
+        mimeType: String(req.query.mimeType ?? 'application/octet-stream'),
+        fileData: body,
+        parsedRows: rows,
+      },
+      update: {
+        fileName,
+        mimeType: String(req.query.mimeType ?? 'application/octet-stream'),
+        fileData: body,
+        parsedRows: rows,
+      },
+      select: {
+        id: true,
+        projectId: true,
+        checklistType: true,
+        phase: true,
+        fileName: true,
+        parsedRows: true,
+        updatedAt: true,
+      },
+    });
+
+    res.json({ message: 'Final Award Response saved successfully', data: saved });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to save Final Award Response' });
+  }
+};
+
+export const getFinalAwardResponse = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const projectId = req.params.projectId;
+    const checklistType = String(req.query.checklistType ?? '').toUpperCase();
+    const phase = String(req.query.phase ?? '').toUpperCase();
+    if (!['NB', 'GH'].includes(checklistType) || !['PRE', 'FINAL'].includes(phase)) {
+      res.status(400).json({ error: 'checklistType (NB/GH) and phase (PRE/FINAL) are required' });
+      return;
+    }
+
+    const response = await prisma.finalAwardResponse.findUnique({
+      where: {
+        projectId_checklistType_phase: {
+          projectId,
+          checklistType: checklistType as ChecklistType,
+          phase: phase as 'PRE' | 'FINAL',
+        },
+      },
+      select: {
+        id: true,
+        projectId: true,
+        checklistType: true,
+        phase: true,
+        fileName: true,
+        parsedRows: true,
+        updatedAt: true,
+      },
+    });
+    res.json({ data: response });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to load Final Award Response' });
   }
 };
 

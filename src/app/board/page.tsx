@@ -3,15 +3,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getProjectSource, ProjectSourceFilter, useProjects } from '@/context/ProjectContext';
 import ProjectListModal from '@/components/ProjectListModal';
-import { CheckCircle2, ChevronDown, Clock3, ExternalLink, Loader2, Plus, TimerReset, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Clock3, ExternalLink, Loader2, Plus, TimerReset, Upload, X } from 'lucide-react';
 import {
   CertificationPhase,
+  checklistStatusChangeEvent,
+  feasibilitySelectionChangeEvent,
   getCertificationScopeKey,
   getReviewResponseScopeStorageKey,
-  getSelectedCreditsScopeStorageKey,
   getSubmissionLifecycleScopeKey,
   readChecklistStatuses,
   readSubmissionLifecycles,
+  submissionLifecycleChangeEvent,
   SubmissionRound,
   WorkflowRequirementStatus,
 } from '@/utils/certificationWorkflow';
@@ -81,15 +83,26 @@ type BoardProject = ApiProject & {
   progressPercent: number;
   stage: BoardStage;
   creditProgress: Record<CertificationPhase, PhaseCreditProgress>;
+  reviewItems: ChecklistReview['items'];
   checkedRequirements: CheckedRequirementGroup[];
 };
 
 type PhaseCreditProgress = {
   first: CategoryProgress[];
   second: CategoryProgress[];
+  pendingRequirements: PendingRequirement[];
   secondStarted: boolean;
   hasData: boolean;
   rating: ProjectRating | null;
+  awardFileName: string | null;
+};
+
+type PendingRequirement = {
+  id: string;
+  creditName: string;
+  subCreditName: string;
+  requirementText: string;
+  completed: boolean;
 };
 
 type ProjectRating = 'Certified' | 'Silver' | 'Gold' | 'Platinum';
@@ -104,7 +117,17 @@ type CategoryProgress = {
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
-const manualAchievableStorageKey = 'pms-feasibility-manual-achievable-by-project';
+const creditPattern = /\b(?:[A-Z]{1,4}\s*(?:MR|CR|Cr|Credit|Mandatory\s+Requirement)\s*\d+(?:\.\d+)?|SA\s*Credit\s*\d+|Site\s*Credit\s*\d+|SSP\s*MR\s*\d+|ID\s*(?:Cr|Credit)\s*\d+(?:\.\d+)?|Credit\s*\d+(?:\.\d+)?)\b/i;
+
+type StoredReviewResponse = {
+  mappedResponses?: Record<string, { pending?: string[] }>;
+  autoSelectedCreditKeys?: string[];
+};
+
+type FinalAwardRecord = {
+  fileName: string;
+  parsedRows: string[][];
+};
 
 const STAGES: Array<{ id: BoardStage; title: string; eyebrow: string; color: string }> = [
   { id: 'START_HERE', title: 'Start Here', eyebrow: 'New added projects', color: 'var(--text-secondary)' },
@@ -169,6 +192,84 @@ const getRating = (points: number): ProjectRating | null => {
   return null;
 };
 
+const getPendingCreditKeys = (
+  projectId: string,
+  checklistType: 'nb' | 'gh',
+  phase: CertificationPhase,
+): Set<string> => {
+  const firstScope = getCertificationScopeKey(projectId, checklistType, phase, 'first');
+  const secondScope = getCertificationScopeKey(projectId, checklistType, phase, 'second');
+  const stored = readStoredRecord<StoredReviewResponse | null>(
+    getReviewResponseScopeStorageKey(firstScope),
+    null,
+  ) ?? readStoredRecord<StoredReviewResponse | null>(
+    getReviewResponseScopeStorageKey(secondScope),
+    null,
+  );
+  if (!stored) return new Set();
+
+  const keys = stored.autoSelectedCreditKeys?.length
+    ? stored.autoSelectedCreditKeys
+    : Object.entries(stored.mappedResponses ?? {})
+      .filter(([, value]) => (value.pending ?? []).some((point) => Number(point) > 0))
+      .map(([key]) => key);
+  return new Set(keys.map(normalizeCreditKey));
+};
+
+const getAwardedPointsByCredit = (rows: string[][]): Map<string, string> => {
+  const result = new Map<string, string>();
+  const normalizeHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const headerIndex = rows.findIndex((row) => row.some((cell) => normalizeHeader(cell).includes('awarded')));
+  const header = headerIndex >= 0 ? rows[headerIndex].map(normalizeHeader) : [];
+  const awardedColumn = header.findIndex((cell) => cell.includes('awarded'));
+  const creditColumn = header.findIndex((cell) => /credit|code|mr|cr/.test(cell));
+
+  rows.slice(headerIndex >= 0 ? headerIndex + 1 : 0).forEach((row) => {
+    const rowText = row.join(' ').trim();
+    const creditText = creditColumn >= 0 ? row[creditColumn] ?? '' : rowText;
+    const credit = creditText.match(creditPattern)?.[0] ?? rowText.match(creditPattern)?.[0];
+    if (!credit) return;
+
+    const awarded = awardedColumn >= 0
+      ? (row[awardedColumn] ?? '').trim()
+      : row.find((cell) => /^(?:y|n|\d+(?:\.\d+)?)$/i.test(cell.trim()))?.trim() ?? '';
+    if (awarded) result.set(normalizeCreditKey(credit), awarded);
+  });
+  return result;
+};
+
+const getAwardRating = (
+  items: ChecklistReview['items'],
+  rows: string[][],
+): ProjectRating | null => {
+  const awardedByCredit = getAwardedPointsByCredit(rows);
+  const awardedPoints = items.reduce((total, item) => {
+    if (item.points?.isRequired || item.points?.availablePoints === null || item.points?.availablePoints === undefined) {
+      return total;
+    }
+    const awarded = awardedByCredit.get(normalizeCreditKey(item.creditName));
+    if (!awarded || /^n$/i.test(awarded)) return total;
+    const points = /^y$/i.test(awarded) ? item.points.availablePoints : Number(awarded);
+    return total + Math.max(0, Math.min(item.points.availablePoints, Number.isFinite(points) ? points : 0));
+  }, 0);
+  return getRating(awardedPoints);
+};
+
+const loadFinalAward = async (
+  projectId: string,
+  checklistType: 'NB' | 'GH',
+  phase: CertificationPhase,
+): Promise<FinalAwardRecord | null> => {
+  const response = await fetch(
+    `${apiBase}/api/checklists/review/${projectId}/final-award?checklistType=${checklistType}&phase=${phase.toUpperCase()}`,
+  );
+  if (!response.ok) return null;
+  const payload = await response.json();
+  return payload.data
+    ? { fileName: payload.data.fileName, parsedRows: payload.data.parsedRows as string[][] }
+    : null;
+};
+
 const getCategoryInfo = (item: ChecklistReview['items'][number], projectType: 'NB' | 'GH') => {
   const categoryText = [item.mainCategory, item.creditGroup, item.creditName, item.subCreditName]
     .filter(Boolean)
@@ -203,6 +304,7 @@ const getCategoryProgress = (
   phase: CertificationPhase,
   round: SubmissionRound,
   scopedStatuses: Record<string, WorkflowRequirementStatus>,
+  includedCreditKeys?: Set<string>,
 ): CategoryProgress[] => {
   const categories = new Map<string, Omit<CategoryProgress, 'percent'>>(
     CREDIT_CATEGORIES.map((category) => [
@@ -216,6 +318,7 @@ const getCategoryProgress = (
   );
 
   items.forEach((item) => {
+    if (includedCreditKeys && !includedCreditKeys.has(normalizeCreditKey(item.creditName))) return;
     const category = getCategoryInfo(item, projectType);
     const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
     const checked = requirements.filter((requirement) => {
@@ -237,63 +340,6 @@ const getCategoryProgress = (
   }));
 };
 
-const getPhaseRating = (
-  items: ChecklistReview['items'],
-  phase: CertificationPhase,
-  firstStatuses: Record<string, WorkflowRequirementStatus>,
-  secondStatuses: Record<string, WorkflowRequirementStatus>,
-  secondSelectedCredits: Record<string, boolean>,
-  firstManualTargeted: Record<string, number>,
-  secondManualTargeted: Record<string, number>,
-  secondStarted: boolean,
-): ProjectRating | null => {
-  if (!secondStarted) return null;
-
-  const targetedPoints = items.reduce((total, item) => {
-    const availablePoints = item.points?.availablePoints;
-    if (item.points?.isRequired || availablePoints === null || availablePoints === undefined) return total;
-
-    const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
-    if (requirements.length === 0) return total;
-
-    const creditKey = normalizeCreditKey(item.creditName);
-    const fulfilled = (status?: WorkflowRequirementStatus) => status === 'checked' || status === 'overridden';
-    const firstRequirementStatuses = requirements.map((requirement) => (
-      firstStatuses[requirement.id] ?? requirement.status
-    ));
-    const secondRequirementStatuses = requirements.map((requirement) => (
-      secondStatuses[requirement.id] ?? 'pending'
-    ));
-    const automaticFirst = availablePoints * (
-      firstRequirementStatuses.filter(fulfilled).length / requirements.length
-    );
-    const firstTargeted = Math.max(
-      0,
-      Math.min(availablePoints, firstManualTargeted[creditKey] ?? automaticFirst),
-    );
-    const automaticSecond = secondSelectedCredits[creditKey]
-      ? availablePoints * (
-        firstRequirementStatuses.filter((status, index) => (
-          !fulfilled(status) && fulfilled(secondRequirementStatuses[index])
-        )).length / requirements.length
-      )
-      : 0;
-    const secondTargeted = secondSelectedCredits[creditKey]
-      ? Math.max(
-        0,
-        Math.min(
-          availablePoints - firstTargeted,
-          secondManualTargeted[creditKey] ?? automaticSecond,
-        ),
-      )
-      : 0;
-
-    return total + firstTargeted + secondTargeted;
-  }, 0);
-
-  return getRating(targetedPoints);
-};
-
 const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> => {
   try {
     const response = await fetch(`${apiBase}/api/checklists/review/${project.id}`);
@@ -311,9 +357,14 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
     const checklistType = review.project.type.toLowerCase() as 'nb' | 'gh';
     const workflowStatuses = readChecklistStatuses();
     const submissionLifecycles = readSubmissionLifecycles();
-    const manualTargeted = readStoredRecord<
-      Record<'nb' | 'gh', Record<string, Record<string, number>>>
-    >(manualAchievableStorageKey, { nb: {}, gh: {} });
+    const [preAward, finalAward] = await Promise.all([
+      loadFinalAward(project.id, review.project.type, 'pre'),
+      loadFinalAward(project.id, review.project.type, 'final'),
+    ]);
+    const awards: Record<CertificationPhase, FinalAwardRecord | null> = {
+      pre: preAward,
+      final: finalAward,
+    };
     const creditProgress = (['pre', 'final'] as CertificationPhase[]).reduce(
       (progress, phase) => {
         const firstScopeKey = getCertificationScopeKey(project.id, checklistType, phase, 'first');
@@ -324,10 +375,7 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
         ));
         const firstStatuses = workflowStatuses[firstScopeKey] ?? {};
         const secondStatuses = workflowStatuses[secondScopeKey] ?? {};
-        const secondSelectedCredits = readStoredRecord<Record<string, boolean>>(
-          getSelectedCreditsScopeStorageKey(secondScopeKey),
-          {},
-        );
+        const pendingCreditKeys = getPendingCreditKeys(project.id, checklistType, phase);
         const hasStoredReviewResponse = typeof window !== 'undefined' && Boolean(
           window.localStorage.getItem(getReviewResponseScopeStorageKey(firstScopeKey))
           || window.localStorage.getItem(getReviewResponseScopeStorageKey(secondScopeKey)),
@@ -340,24 +388,36 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
         const hasData = phaseRequirements.some((requirement) => requirement.status !== 'missing')
           || Object.keys(firstStatuses).length > 0
           || Object.keys(secondStatuses).length > 0;
+        const pendingRequirements = review.items.flatMap((item) => {
+          if (!pendingCreditKeys.has(normalizeCreditKey(item.creditName))) return [];
+          const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
+          return requirements.map((requirement) => {
+            const status = secondStatuses[requirement.id] ?? 'pending';
+            return {
+              id: requirement.id,
+              creditName: item.creditName,
+              subCreditName: item.subCreditName,
+              requirementText: requirement.text,
+              completed: status === 'checked' || status === 'overridden',
+            };
+          });
+        });
 
         progress[phase] = {
           first: getCategoryProgress(review.items, review.project.type, phase, 'first', firstStatuses),
-          second: getCategoryProgress(review.items, review.project.type, phase, 'second', secondStatuses),
+          second: getCategoryProgress(
+            review.items,
+            review.project.type,
+            phase,
+            'second',
+            secondStatuses,
+            pendingCreditKeys,
+          ),
+          pendingRequirements,
           secondStarted,
           hasData,
-          rating: hasData
-            ? getPhaseRating(
-              review.items,
-              phase,
-              firstStatuses,
-              secondStatuses,
-              secondSelectedCredits,
-              manualTargeted[checklistType]?.[firstScopeKey] ?? {},
-              manualTargeted[checklistType]?.[secondScopeKey] ?? {},
-              secondStarted,
-            )
-            : null,
+          rating: awards[phase] ? getAwardRating(review.items, awards[phase]!.parsedRows) : null,
+          awardFileName: awards[phase]?.fileName ?? null,
         };
         return progress;
       },
@@ -396,6 +456,7 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
       progressPercent,
       stage,
       creditProgress,
+      reviewItems: review.items,
       checkedRequirements,
     };
   } catch {
@@ -411,9 +472,10 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
       progressPercent: 0,
       stage: project.checklistStage === 'FINAL_SUBMISSION' ? 'FINAL_SUBMISSION' : 'START_HERE',
       creditProgress: {
-        pre: { first: [], second: [], secondStarted: false, hasData: false, rating: null },
-        final: { first: [], second: [], secondStarted: false, hasData: false, rating: null },
+        pre: { first: [], second: [], pendingRequirements: [], secondStarted: false, hasData: false, rating: null, awardFileName: null },
+        final: { first: [], second: [], pendingRequirements: [], secondStarted: false, hasData: false, rating: null, awardFileName: null },
       },
+      reviewItems: [],
       checkedRequirements: [],
     };
   }
@@ -427,6 +489,12 @@ export default function ProjectsPage() {
   const [showProjectListModal, setShowProjectListModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<BoardProject | null>(null);
   const [expandedProgressByProject, setExpandedProgressByProject] = useState<Record<string, CertificationPhase | undefined>>({});
+  const [awardUploadState, setAwardUploadState] = useState<Record<string, 'uploading' | 'saved' | 'error'>>({});
+  const [pendingListDialog, setPendingListDialog] = useState<{
+    projectId: string;
+    phase: CertificationPhase;
+    mode: 'completed' | 'remaining';
+  } | null>(null);
 
   const loadBoardProjects = async () => {
     setIsLoading(true);
@@ -476,10 +544,48 @@ export default function ProjectsPage() {
     loadBoardProjects();
   }, []);
 
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshProgress = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        try {
+          const response = await fetch(`${apiBase}/api/projects/public`);
+          if (!response.ok) return;
+          const payload = await response.json();
+          const mapped = await Promise.all(((payload.data || []) as ApiProject[]).map(mapProjectWithReview));
+          setBoardProjects(mapped);
+        } catch {
+          // Keep the current cards visible when a background refresh is unavailable.
+        }
+      }, 80);
+    };
+
+    window.addEventListener(checklistStatusChangeEvent, refreshProgress);
+    window.addEventListener(feasibilitySelectionChangeEvent, refreshProgress);
+    window.addEventListener(submissionLifecycleChangeEvent, refreshProgress);
+    window.addEventListener('storage', refreshProgress);
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener(checklistStatusChangeEvent, refreshProgress);
+      window.removeEventListener(feasibilitySelectionChangeEvent, refreshProgress);
+      window.removeEventListener(submissionLifecycleChangeEvent, refreshProgress);
+      window.removeEventListener('storage', refreshProgress);
+    };
+  }, []);
+
   const filteredProjects = useMemo(() => {
     if (!sourceFilter) return boardProjects;
     return boardProjects.filter((project) => getSourceFromBoardProject(project) === sourceFilter);
   }, [boardProjects, sourceFilter]);
+  const pendingListProject = pendingListDialog
+    ? boardProjects.find((project) => project.id === pendingListDialog.projectId)
+    : null;
+  const pendingListItems = pendingListProject && pendingListDialog
+    ? pendingListProject.creditProgress[pendingListDialog.phase].pendingRequirements.filter((requirement) => (
+      pendingListDialog.mode === 'completed' ? requirement.completed : !requirement.completed
+    ))
+    : [];
 
   const openProjectData = (project: BoardProject) => {
     if (project.stage !== 'REVIEW' && project.stage !== 'FINAL_SUBMISSION') return;
@@ -510,9 +616,58 @@ export default function ProjectsPage() {
     }));
   };
 
+  const uploadFinalAward = async (
+    project: BoardProject,
+    phase: CertificationPhase,
+    file: File | null,
+  ) => {
+    if (!file || project.projectType === 'Project') return;
+    const uploadKey = `${project.id}:${phase}`;
+    setAwardUploadState((current) => ({ ...current, [uploadKey]: 'uploading' }));
+
+    try {
+      const response = await fetch(
+        `${apiBase}/api/checklists/review/${project.id}/final-award`
+        + `?checklistType=${project.projectType}&phase=${phase.toUpperCase()}`
+        + `&fileName=${encodeURIComponent(file.name)}&mimeType=${encodeURIComponent(file.type || 'application/octet-stream')}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: await file.arrayBuffer(),
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || 'Final Award Response upload failed');
+
+      const rows = (payload?.data?.parsedRows ?? []) as string[][];
+      setBoardProjects((current) => current.map((item) => {
+        if (item.id !== project.id) return item;
+        return {
+          ...item,
+          creditProgress: {
+            ...item.creditProgress,
+            [phase]: {
+              ...item.creditProgress[phase],
+              awardFileName: file.name,
+              rating: getAwardRating(item.reviewItems, rows),
+            },
+          },
+        };
+      }));
+      setAwardUploadState((current) => ({ ...current, [uploadKey]: 'saved' }));
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Final Award Response upload failed');
+      setAwardUploadState((current) => ({ ...current, [uploadKey]: 'error' }));
+    }
+  };
+
   const renderProjectCard = (project: BoardProject, stageId: BoardStage) => {
     const expandedPhase = expandedProgressByProject[project.id];
-    const activeRating = expandedPhase ? project.creditProgress[expandedPhase].rating : null;
+    const uploadPhase = expandedPhase ?? 'pre';
+    const uploadKey = `${project.id}:${uploadPhase}`;
+    const activeRating = expandedPhase
+      ? project.creditProgress[expandedPhase].rating
+      : project.creditProgress.final.rating ?? project.creditProgress.pre.rating;
     const ratingClass = activeRating === 'Certified'
       ? styles.ratingCertified
       : activeRating === 'Silver'
@@ -566,7 +721,7 @@ export default function ProjectsPage() {
         key={project.id}
         role={stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION' ? 'button' : undefined}
         tabIndex={stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION' ? 0 : undefined}
-        className={`${styles.projectCard} ${ratingClass} ${stageId === 'START_HERE' || stageId === 'PROGRESS' ? styles.staticCard : ''}`}
+        className={`${styles.projectCard} ${expandedPhase ? styles.expandedProjectCard : ''} ${ratingClass} ${stageId === 'START_HERE' || stageId === 'PROGRESS' ? styles.staticCard : ''}`}
         onClick={() => openProjectData(project)}
         onKeyDown={(event) => {
           if ((event.key === 'Enter' || event.key === ' ') && (stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION')) {
@@ -601,6 +756,28 @@ export default function ProjectsPage() {
               <ChevronDown size={14} className={expandedPhase === phase ? styles.toggleIconOpen : undefined} />
             </button>
           ))}
+          {project.projectType !== 'Project' && (
+            <label className={styles.awardUploadButton} title={`Upload award for ${uploadPhase === 'pre' ? 'Pre' : 'Final'} Certification`}>
+              {awardUploadState[uploadKey] === 'uploading'
+                ? <Loader2 size={13} className={styles.loadingIcon} />
+                : <Upload size={13} />}
+              <span>Upload Final Award Response</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.txt,.pdf"
+                disabled={awardUploadState[uploadKey] === 'uploading'}
+                onChange={(event) => {
+                  void uploadFinalAward(project, uploadPhase, event.target.files?.[0] ?? null);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+          )}
+        </div>
+
+        <div className={styles.awardStatus} onClick={(event) => event.stopPropagation()}>
+          <span>{project.creditProgress[uploadPhase].rating ?? 'Waiting for IGBC Review'}</span>
+          <small>{project.creditProgress[uploadPhase].awardFileName ?? 'Final Award not uploaded'}</small>
         </div>
 
         {expandedPhase && (
@@ -613,6 +790,30 @@ export default function ProjectsPage() {
                   <h4>1st Submission</h4>
                   {renderCategoryList(project.creditProgress[expandedPhase].first)}
                 </section>
+                <aside className={styles.pendingCreditsSummary}>
+                  <span>Pending Credits</span>
+                  <strong>{activeSecondTotals?.total ?? 0}</strong>
+                  <button
+                    type="button"
+                    onClick={() => setPendingListDialog({
+                      projectId: project.id,
+                      phase: expandedPhase,
+                      mode: 'completed',
+                    })}
+                  >
+                    Completed {activeSecondTotals?.checked ?? 0}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingListDialog({
+                      projectId: project.id,
+                      phase: expandedPhase,
+                      mode: 'remaining',
+                    })}
+                  >
+                    Remaining {Math.max(0, (activeSecondTotals?.total ?? 0) - (activeSecondTotals?.checked ?? 0))}
+                  </button>
+                </aside>
                 <section className={styles.submissionProgressColumn}>
                   <h4>2nd Submission</h4>
                   {project.creditProgress[expandedPhase].secondStarted
@@ -717,6 +918,43 @@ export default function ProjectsPage() {
           setShowProjectListModal(false);
         }}
       />
+      {pendingListDialog && pendingListProject && (
+        <div className={styles.modalOverlay} onClick={() => setPendingListDialog(null)}>
+          <div className={`${styles.pendingListModal} glassmorphism`} onClick={(event) => event.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h2>
+                  {pendingListDialog.mode === 'completed' ? 'Completed' : 'Remaining'} Pending Credits
+                </h2>
+                <p>
+                  {pendingListProject.name} · {pendingListDialog.phase === 'pre' ? 'Pre' : 'Final'} Certification · {pendingListItems.length}
+                </p>
+              </div>
+              <button type="button" className={styles.closeButton} onClick={() => setPendingListDialog(null)} aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className={styles.pendingRequirementList}>
+              {pendingListItems.length > 0 ? pendingListItems.map((requirement) => (
+                <article key={requirement.id} className={styles.pendingRequirementRow}>
+                  <div>
+                    <strong>{requirement.creditName}</strong>
+                    {requirement.subCreditName && <span>{requirement.subCreditName}</span>}
+                  </div>
+                  <p>{requirement.requirementText}</p>
+                  <span className={requirement.completed ? styles.completedCreditStatus : styles.remainingCreditStatus}>
+                    {requirement.completed ? 'Checked' : 'Pending'}
+                  </span>
+                </article>
+              )) : (
+                <div className={styles.noFiles}>
+                  No {pendingListDialog.mode} credits found.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {selectedProject && (
         <div className={styles.modalOverlay} onClick={() => setSelectedProject(null)}>
           <div className={`${styles.checkedFilesModal} glassmorphism`} onClick={(event) => event.stopPropagation()}>
