@@ -45,6 +45,13 @@ const priorityLabels: Record<TaskPriority, string> = {
   low: 'Low',
 };
 
+const priorityColors: Record<TaskPriority, string> = {
+  critical: '#dc2626',
+  high: '#ef4444',
+  medium: '#f97316',
+  low: '#22c55e',
+};
+
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const formatDateOnly = (date: Date) => (
@@ -189,6 +196,11 @@ const calculatePriority = (deadline: string): TaskPriority => {
   return 'low';
 };
 
+const getTaskPriority = (task: Task): TaskPriority => {
+  const syncedTask = task as SyncedCalendarTask;
+  return calculatePriority(syncedTask.sheetDeadline || task.dueDate);
+};
+
 const getProjectTypeFromProject = (project?: Project): DeadlineProjectType | '' => {
   const source = getProjectSource(project);
   if (source === 'NB') return 'NB';
@@ -255,6 +267,7 @@ export default function CalendarPage() {
   }), [projectType, selectableProjects]);
   const selectedProjectRecord = selectableProjects.find((project) => project.id === projectId);
   const calculatedPriority = calculatePriority(deadline);
+  const selectedTaskPriority = selectedTask ? getTaskPriority(selectedTask) : 'low';
   const filteredTasks = tasks.filter((task) => {
     if (selectedProject !== 'all' && task.project !== selectedProject) return false;
     const syncedTask = task as SyncedCalendarTask;
@@ -569,7 +582,7 @@ export default function CalendarPage() {
           title: sheetRow.projectName,
           description: sheetRow.note,
           status: sheetRow.status,
-          priority: calculatePriority(sheetRow.date),
+          priority: calculatePriority(sheetRow.deadline || sheetRow.date),
           dueDate: sheetRow.date,
           assigneeId: matchedAssignee?.id || '',
           assigneeEmail: sheetRow.assigneeEmail,
@@ -755,19 +768,20 @@ export default function CalendarPage() {
                     const assignee = team.find((member) => member.id === task.assigneeId);
                     const syncedTask = task as SyncedCalendarTask;
                     const assigneeName = assignee?.name || syncedTask.sheetAssignedTo || task.managerName || 'Unassigned';
-                    const taskPriority = task.status === 'done' ? 'done' : task.priority;
+                    const deadlinePriority = getTaskPriority(task);
+                    const taskPriority = task.status === 'done' ? 'done' : deadlinePriority;
 
                     return (
                       <button
                         key={task.id}
                         className={`${styles.taskStrip} ${styles[taskPriority]}`}
                         onClick={(e) => handleTaskClick(e, task)}
-                        title={`${task.title} - ${statusLabels[task.status]} - ${priorityLabels[task.priority]} - ${assigneeName}`}
+                        title={`${task.title} - ${statusLabels[task.status]} - ${priorityLabels[deadlinePriority]} - ${assigneeName}`}
                       >
                         <span className={styles.priorityDot} />
                         <span className={styles.taskTitle}>{task.title}</span>
                         <span className={styles.taskMeta}>
-                          {statusLabels[task.status]} · {priorityLabels[task.priority]} · {assigneeName}
+                          {statusLabels[task.status]} · {priorityLabels[deadlinePriority]} · {assigneeName}
                         </span>
                       </button>
                     );
@@ -888,7 +902,11 @@ export default function CalendarPage() {
 
       {isDetailsOpen && selectedTask && (
         <div className={styles.deadlineOverlay} onClick={handleCloseDetails}>
-          <div className={`${styles.deadlineModal} glassmorphic animate-fade-in`} onClick={(event) => event.stopPropagation()}>
+          <div
+            className={`${styles.deadlineModal} ${styles.priorityModal} glassmorphic animate-fade-in`}
+            style={{ '--deadline-priority-color': priorityColors[selectedTaskPriority] } as React.CSSProperties}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className={styles.modalHeader}>
               <h2>Project Deadline Details</h2>
               <button type="button" className={styles.closeBtn} onClick={handleCloseDetails} aria-label="Close details">
@@ -940,7 +958,7 @@ export default function CalendarPage() {
 
                 <div className={styles.detailItem}>
                   <span><Tag size={14} />Priority</span>
-                  <strong className={`${styles.priorityBadge} ${styles[selectedTask.priority]}`}>{priorityLabels[selectedTask.priority]}</strong>
+                  <strong className={`${styles.priorityBadge} ${styles[selectedTaskPriority]}`}>{priorityLabels[selectedTaskPriority]}</strong>
                 </div>
               </div>
 

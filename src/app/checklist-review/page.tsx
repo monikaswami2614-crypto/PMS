@@ -60,11 +60,6 @@ type ReviewResponse = {
   items: ReviewItem[];
 };
 
-type ActiveRequirement = {
-  requirement: RequirementPoint;
-  phase: 'pre' | 'final';
-};
-
 type FiltrationPhase = 'pre' | 'final';
 type SubmissionNumber = 1 | 2;
 
@@ -133,6 +128,7 @@ const subscribeToSelectedProject = (onStoreChange: () => void) => {
 
 const getSelectedProjectSnapshot = () => window.localStorage.getItem(selectedProjectStorageKey) ?? '';
 const statusOptions: RequirementStatus[] = ['pending', 'missing', 'checked', 'overridden'];
+const firstSubmissionStatusOptions = statusOptions.filter((status) => status !== 'pending');
 const normalizeCreditKey = (value: string): string => (
   (value
     .toLowerCase()
@@ -202,7 +198,6 @@ export default function ChecklistReviewPage() {
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [activeRequirement, setActiveRequirement] = useState<ActiveRequirement | null>(null);
   const [error, setError] = useState('');
   const [filtrationPhase, setFiltrationPhase] = useState<FiltrationPhase | null>(null);
   const [filtrationData, setFiltrationData] = useState<FiltrationResponse | null>(null);
@@ -875,8 +870,9 @@ export default function ChecklistReviewPage() {
       || !selectedRequirementIdsBySubmission.second.has(requirement.id)
     )) return 'missing';
     if (submission === 1 && !selectedRequirementIdsBySubmission.first.has(requirement.id)) return 'missing';
-    return workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
+    const status = workflowStatuses[getReviewScopeKey(phase, submission)]?.[requirement.id]
       ?? (submission === 1 ? requirement.status : 'pending');
+    return submission === 1 && status === 'pending' ? 'missing' : status;
   };
 
   const isRequirementEditable = (requirementId: string, submission: SubmissionNumber) => (
@@ -933,7 +929,7 @@ export default function ChecklistReviewPage() {
             : undefined}
           aria-label={`${phase === 'pre' ? 'Pre' : 'Final'} submission ${submission} requirement status`}
         >
-          {statusOptions.map((option) => (
+          {(submission === 1 ? firstSubmissionStatusOptions : statusOptions).map((option) => (
             <option key={option} value={option}>
               {option[0].toUpperCase() + option.slice(1)}
             </option>
@@ -955,16 +951,11 @@ export default function ChecklistReviewPage() {
       <div className={styles.requirementList}>
         {requirements.map((requirement) => {
           const status = getSubmissionStatus(requirement, phase, submission);
-          const displayedRequirement = { ...requirement, status };
           return (
           <div key={requirement.id} className={`${styles.requirementPoint} ${styles[`point-${status}`]}`}>
-            <button
-              type="button"
-              className={styles.requirementTextButton}
-              onClick={() => setActiveRequirement({ requirement: displayedRequirement, phase })}
-            >
+            <span className={styles.requirementText}>
               {requirement.text}
-            </button>
+            </span>
             {renderStatusSelect(requirement, phase, submission)}
           </div>
           );
@@ -1134,7 +1125,8 @@ export default function ChecklistReviewPage() {
 
   return (
     <div className={styles.container}>
-      <div className={`${styles.toolbar} glassmorphism`}>
+      <div className={styles.checklistStickyControls}>
+        <div className={`${styles.toolbar} glassmorphism`}>
         <div className={styles.selectorGroup}>
           <ClipboardCheck size={18} className={styles.toolbarIcon} />
           <select
@@ -1176,9 +1168,9 @@ export default function ChecklistReviewPage() {
           <span className={styles.summaryPill}>Pre {completedPre}/{preRequirements.length}</span>
           <span className={styles.summaryPill}>Final {completedFinal}/{finalRequirements.length}</span>
         </div>
-      </div>
+        </div>
 
-      <section className={`${styles.submissionStatsBar} glassmorphism`} aria-label="Submission status counts">
+        <section className={`${styles.submissionStatsBar} glassmorphism`} aria-label="Submission status counts">
         <div className={styles.submissionStatsGroup}>
           <strong>
             1st Submission
@@ -1210,7 +1202,8 @@ export default function ChecklistReviewPage() {
             Missing <b>{secondSubmissionCounts.missing}</b>
           </span>
         </div>
-      </section>
+        </section>
+      </div>
 
       {error && <div className={styles.errorBox}>{error}</div>}
 
@@ -1254,47 +1247,6 @@ export default function ChecklistReviewPage() {
           </div>
         )}
       </div>
-
-      {activeRequirement && (
-        <div className={styles.modalOverlay} onClick={() => setActiveRequirement(null)}>
-          <div className={`${styles.modal} glassmorphism`} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <h2>Requirement Details</h2>
-                <span className={`${styles.statusBadge} ${styles[`status-${activeRequirement.requirement.status}`]}`}>
-                  {activeRequirement.requirement.status}
-                </span>
-              </div>
-              <button type="button" className={styles.closeButton} onClick={() => setActiveRequirement(null)} aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className={styles.modalBody}>
-              <div className={styles.modalSection}>
-                <h3>Requirement</h3>
-                <p>{activeRequirement.requirement.text}</p>
-              </div>
-
-              <div className={styles.modalSection}>
-                <h3>Matched Files</h3>
-                {activeRequirement.requirement.matchedFiles.length > 0 ? (
-                  <div className={styles.fileList}>
-                    {activeRequirement.requirement.matchedFiles.map((file) => (
-                      <button key={file.id} type="button" className={styles.fileButton} onClick={() => openFilePreview(file.id)}>
-                        <span>{file.name}</span>
-                        <ExternalLink size={14} />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.noFiles}>No matched files found</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {filtrationPhase && (
         <div className={styles.modalOverlay} onClick={() => setFiltrationPhase(null)}>

@@ -4,6 +4,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { getProjectSource, ProjectSourceFilter, useProjects } from '@/context/ProjectContext';
 import ProjectListModal from '@/components/ProjectListModal';
 import { CheckCircle2, ChevronDown, Clock3, ExternalLink, Loader2, Plus, TimerReset, X } from 'lucide-react';
+import {
+  CertificationPhase,
+  getCertificationScopeKey,
+  getReviewResponseScopeStorageKey,
+  getSelectedCreditsScopeStorageKey,
+  getSubmissionLifecycleScopeKey,
+  readChecklistStatuses,
+  readSubmissionLifecycles,
+  SubmissionRound,
+  WorkflowRequirementStatus,
+} from '@/utils/certificationWorkflow';
 import styles from './page.module.css';
 
 type BoardStage = 'START_HERE' | 'PROGRESS' | 'REVIEW' | 'FINAL_SUBMISSION';
@@ -20,6 +31,7 @@ type ApiProject = {
 };
 
 type Requirement = {
+  id: string;
   status: 'pending' | 'missing' | 'checked' | 'overridden';
   text: string;
   matchedFiles: MatchedFile[];
@@ -42,6 +54,10 @@ type ChecklistReview = {
     mainCategory?: string | null;
     creditGroup?: string | null;
     subCreditName: string;
+    points?: {
+      availablePoints: number | null;
+      isRequired: boolean;
+    } | null;
     preRequirements: Requirement[];
     finalRequirements: Requirement[];
   }>;
@@ -64,9 +80,19 @@ type BoardProject = ApiProject & {
   finalTotal: number;
   progressPercent: number;
   stage: BoardStage;
-  categoryProgress: CategoryProgress[];
+  creditProgress: Record<CertificationPhase, PhaseCreditProgress>;
   checkedRequirements: CheckedRequirementGroup[];
 };
+
+type PhaseCreditProgress = {
+  first: CategoryProgress[];
+  second: CategoryProgress[];
+  secondStarted: boolean;
+  hasData: boolean;
+  rating: ProjectRating | null;
+};
+
+type ProjectRating = 'Certified' | 'Silver' | 'Gold' | 'Platinum';
 
 type CategoryProgress = {
   key: string;
@@ -78,6 +104,7 @@ type CategoryProgress = {
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:5000';
+const manualAchievableStorageKey = 'pms-feasibility-manual-achievable-by-project';
 
 const STAGES: Array<{ id: BoardStage; title: string; eyebrow: string; color: string }> = [
   { id: 'START_HERE', title: 'Start Here', eyebrow: 'New added projects', color: 'var(--text-secondary)' },
@@ -109,6 +136,39 @@ const CREDIT_CATEGORIES = [
   { key: 'IN', shortName: 'IN', fullName: 'Innovation / Design Process' },
 ] as const;
 
+const normalizeCreditKey = (value: string): string => (
+  (value
+    .toLowerCase()
+    .replace(/\bmandatory\s+requirements?\b/g, 'mr')
+    .replace(/\bcredits?\b/g, 'cr')
+    .match(/[a-z]+|\d+/g) ?? [])
+    .map((token) => {
+      if (token === 'rwh') return 'rhw';
+      if (token === 'credit' || token === 'credits') return 'cr';
+      if (token === 'mandatory' || token === 'requirement' || token === 'requirements') return 'mr';
+      return token;
+    })
+    .join('')
+);
+
+const readStoredRecord = <T,>(key: string, fallback: T): T => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const stored = window.localStorage.getItem(key);
+    return stored ? JSON.parse(stored) as T : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const getRating = (points: number): ProjectRating | null => {
+  if (points >= 75) return 'Platinum';
+  if (points >= 60) return 'Gold';
+  if (points >= 50) return 'Silver';
+  if (points >= 40) return 'Certified';
+  return null;
+};
+
 const getCategoryInfo = (item: ChecklistReview['items'][number], projectType: 'NB' | 'GH') => {
   const categoryText = [item.mainCategory, item.creditGroup, item.creditName, item.subCreditName]
     .filter(Boolean)
@@ -137,7 +197,13 @@ const getCategoryInfo = (item: ChecklistReview['items'][number], projectType: 'N
   return CREDIT_CATEGORIES[0];
 };
 
-const getCategoryProgress = (items: ChecklistReview['items'], projectType: 'NB' | 'GH'): CategoryProgress[] => {
+const getCategoryProgress = (
+  items: ChecklistReview['items'],
+  projectType: 'NB' | 'GH',
+  phase: CertificationPhase,
+  round: SubmissionRound,
+  scopedStatuses: Record<string, WorkflowRequirementStatus>,
+): CategoryProgress[] => {
   const categories = new Map<string, Omit<CategoryProgress, 'percent'>>(
     CREDIT_CATEGORIES.map((category) => [
       category.key,
@@ -151,10 +217,12 @@ const getCategoryProgress = (items: ChecklistReview['items'], projectType: 'NB' 
 
   items.forEach((item) => {
     const category = getCategoryInfo(item, projectType);
-    const requirements = item.preRequirements;
-    const checked = requirements.filter((requirement) => (
-      requirement.status === 'checked' || requirement.status === 'overridden'
-    )).length;
+    const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
+    const checked = requirements.filter((requirement) => {
+      const status = scopedStatuses[requirement.id]
+        ?? (round === 'first' ? requirement.status : 'missing');
+      return status === 'checked' || status === 'overridden';
+    }).length;
     const existing = categories.get(category.key)!;
     categories.set(category.key, {
       ...existing,
@@ -167,6 +235,63 @@ const getCategoryProgress = (items: ChecklistReview['items'], projectType: 'NB' 
     ...category,
     percent: category.total > 0 ? Math.round((category.checked / category.total) * 100) : 0,
   }));
+};
+
+const getPhaseRating = (
+  items: ChecklistReview['items'],
+  phase: CertificationPhase,
+  firstStatuses: Record<string, WorkflowRequirementStatus>,
+  secondStatuses: Record<string, WorkflowRequirementStatus>,
+  secondSelectedCredits: Record<string, boolean>,
+  firstManualTargeted: Record<string, number>,
+  secondManualTargeted: Record<string, number>,
+  secondStarted: boolean,
+): ProjectRating | null => {
+  if (!secondStarted) return null;
+
+  const targetedPoints = items.reduce((total, item) => {
+    const availablePoints = item.points?.availablePoints;
+    if (item.points?.isRequired || availablePoints === null || availablePoints === undefined) return total;
+
+    const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
+    if (requirements.length === 0) return total;
+
+    const creditKey = normalizeCreditKey(item.creditName);
+    const fulfilled = (status?: WorkflowRequirementStatus) => status === 'checked' || status === 'overridden';
+    const firstRequirementStatuses = requirements.map((requirement) => (
+      firstStatuses[requirement.id] ?? requirement.status
+    ));
+    const secondRequirementStatuses = requirements.map((requirement) => (
+      secondStatuses[requirement.id] ?? 'pending'
+    ));
+    const automaticFirst = availablePoints * (
+      firstRequirementStatuses.filter(fulfilled).length / requirements.length
+    );
+    const firstTargeted = Math.max(
+      0,
+      Math.min(availablePoints, firstManualTargeted[creditKey] ?? automaticFirst),
+    );
+    const automaticSecond = secondSelectedCredits[creditKey]
+      ? availablePoints * (
+        firstRequirementStatuses.filter((status, index) => (
+          !fulfilled(status) && fulfilled(secondRequirementStatuses[index])
+        )).length / requirements.length
+      )
+      : 0;
+    const secondTargeted = secondSelectedCredits[creditKey]
+      ? Math.max(
+        0,
+        Math.min(
+          availablePoints - firstTargeted,
+          secondManualTargeted[creditKey] ?? automaticSecond,
+        ),
+      )
+      : 0;
+
+    return total + firstTargeted + secondTargeted;
+  }, 0);
+
+  return getRating(targetedPoints);
 };
 
 const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> => {
@@ -183,7 +308,61 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
     const finalChecked = finalRequirements.filter(isCompleted).length;
     const progressPercent = preRequirements.length > 0 ? Math.round((preChecked / preRequirements.length) * 100) : 0;
     const stage = project.checklistStage === 'FINAL_SUBMISSION' ? 'FINAL_SUBMISSION' : getAutoStage(progressPercent);
-    const categoryProgress = getCategoryProgress(review.items, review.project.type);
+    const checklistType = review.project.type.toLowerCase() as 'nb' | 'gh';
+    const workflowStatuses = readChecklistStatuses();
+    const submissionLifecycles = readSubmissionLifecycles();
+    const manualTargeted = readStoredRecord<
+      Record<'nb' | 'gh', Record<string, Record<string, number>>>
+    >(manualAchievableStorageKey, { nb: {}, gh: {} });
+    const creditProgress = (['pre', 'final'] as CertificationPhase[]).reduce(
+      (progress, phase) => {
+        const firstScopeKey = getCertificationScopeKey(project.id, checklistType, phase, 'first');
+        const secondScopeKey = getCertificationScopeKey(project.id, checklistType, phase, 'second');
+        const lifecycleScopeKey = getSubmissionLifecycleScopeKey(project.id, checklistType, phase);
+        const phaseRequirements = review.items.flatMap((item) => (
+          phase === 'pre' ? item.preRequirements : item.finalRequirements
+        ));
+        const firstStatuses = workflowStatuses[firstScopeKey] ?? {};
+        const secondStatuses = workflowStatuses[secondScopeKey] ?? {};
+        const secondSelectedCredits = readStoredRecord<Record<string, boolean>>(
+          getSelectedCreditsScopeStorageKey(secondScopeKey),
+          {},
+        );
+        const hasStoredReviewResponse = typeof window !== 'undefined' && Boolean(
+          window.localStorage.getItem(getReviewResponseScopeStorageKey(firstScopeKey))
+          || window.localStorage.getItem(getReviewResponseScopeStorageKey(secondScopeKey)),
+        );
+
+        const secondStarted = Boolean(
+          submissionLifecycles[lifecycleScopeKey]?.reviewResponseUploaded
+          || hasStoredReviewResponse
+        );
+        const hasData = phaseRequirements.some((requirement) => requirement.status !== 'missing')
+          || Object.keys(firstStatuses).length > 0
+          || Object.keys(secondStatuses).length > 0;
+
+        progress[phase] = {
+          first: getCategoryProgress(review.items, review.project.type, phase, 'first', firstStatuses),
+          second: getCategoryProgress(review.items, review.project.type, phase, 'second', secondStatuses),
+          secondStarted,
+          hasData,
+          rating: hasData
+            ? getPhaseRating(
+              review.items,
+              phase,
+              firstStatuses,
+              secondStatuses,
+              secondSelectedCredits,
+              manualTargeted[checklistType]?.[firstScopeKey] ?? {},
+              manualTargeted[checklistType]?.[secondScopeKey] ?? {},
+              secondStarted,
+            )
+            : null,
+        };
+        return progress;
+      },
+      {} as Record<CertificationPhase, PhaseCreditProgress>,
+    );
     const checkedRequirements = review.items.flatMap((item) => [
       ...item.preRequirements
         .filter(isCompleted)
@@ -216,7 +395,7 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
       finalTotal: finalRequirements.length,
       progressPercent,
       stage,
-      categoryProgress,
+      creditProgress,
       checkedRequirements,
     };
   } catch {
@@ -231,7 +410,10 @@ const mapProjectWithReview = async (project: ApiProject): Promise<BoardProject> 
       finalTotal: 0,
       progressPercent: 0,
       stage: project.checklistStage === 'FINAL_SUBMISSION' ? 'FINAL_SUBMISSION' : 'START_HERE',
-      categoryProgress: [],
+      creditProgress: {
+        pre: { first: [], second: [], secondStarted: false, hasData: false, rating: null },
+        final: { first: [], second: [], secondStarted: false, hasData: false, rating: null },
+      },
       checkedRequirements: [],
     };
   }
@@ -244,7 +426,7 @@ export default function ProjectsPage() {
   const [error, setError] = useState('');
   const [showProjectListModal, setShowProjectListModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<BoardProject | null>(null);
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
+  const [expandedProgressByProject, setExpandedProgressByProject] = useState<Record<string, CertificationPhase | undefined>>({});
 
   const loadBoardProjects = async () => {
     setIsLoading(true);
@@ -321,27 +503,70 @@ export default function ProjectsPage() {
     }
   };
 
-  const toggleCategoryProgress = (projectId: string) => {
-    setExpandedProjectIds((currentIds) => {
-      const nextIds = new Set(currentIds);
-      if (nextIds.has(projectId)) {
-        nextIds.delete(projectId);
-      } else {
-        nextIds.add(projectId);
-      }
-      return nextIds;
-    });
+  const toggleCategoryProgress = (projectId: string, phase: CertificationPhase) => {
+    setExpandedProgressByProject((current) => ({
+      ...current,
+      [projectId]: current[projectId] === phase ? undefined : phase,
+    }));
   };
 
   const renderProjectCard = (project: BoardProject, stageId: BoardStage) => {
-    const isCategoryProgressExpanded = expandedProjectIds.has(project.id);
+    const expandedPhase = expandedProgressByProject[project.id];
+    const activeRating = expandedPhase ? project.creditProgress[expandedPhase].rating : null;
+    const ratingClass = activeRating === 'Certified'
+      ? styles.ratingCertified
+      : activeRating === 'Silver'
+        ? styles.ratingSilver
+        : activeRating === 'Gold'
+          ? styles.ratingGold
+          : activeRating === 'Platinum'
+            ? styles.ratingPlatinum
+            : '';
+    const getProgressTotals = (categories: CategoryProgress[]) => categories.reduce(
+      (totals, category) => ({
+        checked: totals.checked + category.checked,
+        total: totals.total + category.total,
+      }),
+      { checked: 0, total: 0 },
+    );
+    const activeFirstTotals = expandedPhase
+      ? getProgressTotals(project.creditProgress[expandedPhase].first)
+      : null;
+    const activeSecondTotals = expandedPhase
+      ? getProgressTotals(project.creditProgress[expandedPhase].second)
+      : null;
+    const renderCategoryList = (categories: CategoryProgress[]) => (
+      <div className={styles.categoryProgressList}>
+        {categories.length > 0 ? (
+          categories.map((category) => (
+            <div key={category.key} className={styles.categoryProgressItem}>
+              <div className={styles.categoryProgressHeader}>
+                <div>
+                  <strong>{category.shortName}</strong>
+                  {category.fullName && category.fullName !== category.shortName && <span>{category.fullName}</span>}
+                </div>
+                <span>{category.percent}%</span>
+              </div>
+              <div className={styles.categoryProgressMeta}>
+                {category.checked}/{category.total}
+              </div>
+              <div className={styles.categoryProgressLine}>
+                <span style={{ width: `${category.percent}%` }} />
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className={styles.emptyCategoryProgress}>No credit progress available</div>
+        )}
+      </div>
+    );
 
     return (
       <div
         key={project.id}
         role={stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION' ? 'button' : undefined}
         tabIndex={stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION' ? 0 : undefined}
-        className={`${styles.projectCard} ${stageId === 'START_HERE' || stageId === 'PROGRESS' ? styles.staticCard : ''}`}
+        className={`${styles.projectCard} ${ratingClass} ${stageId === 'START_HERE' || stageId === 'PROGRESS' ? styles.staticCard : ''}`}
         onClick={() => openProjectData(project)}
         onKeyDown={(event) => {
           if ((event.key === 'Enter' || event.key === ' ') && (stageId === 'REVIEW' || stageId === 'FINAL_SUBMISSION')) {
@@ -362,49 +587,59 @@ export default function ProjectsPage() {
           <span style={{ width: `${project.progressPercent}%` }} />
         </div>
 
-        <button
-          type="button"
-          className={styles.creditProgressToggle}
-          aria-expanded={isCategoryProgressExpanded}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleCategoryProgress(project.id);
-          }}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <span>Show Credit Progress</span>
-          <ChevronDown size={14} className={isCategoryProgressExpanded ? styles.toggleIconOpen : undefined} />
-        </button>
+        <div className={styles.creditProgressTabs} onClick={(event) => event.stopPropagation()}>
+          {(['pre', 'final'] as CertificationPhase[]).map((phase) => (
+            <button
+              key={phase}
+              type="button"
+              className={`${styles.creditProgressToggle} ${expandedPhase === phase ? styles.activeProgressTab : ''}`}
+              aria-expanded={expandedPhase === phase}
+              onClick={() => toggleCategoryProgress(project.id, phase)}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <span>{phase === 'pre' ? 'Pre Progress' : 'Final Progress'}</span>
+              <ChevronDown size={14} className={expandedPhase === phase ? styles.toggleIconOpen : undefined} />
+            </button>
+          ))}
+        </div>
 
-        {isCategoryProgressExpanded && (
-          <div className={styles.categoryProgressList} onClick={(event) => event.stopPropagation()}>
-            {project.categoryProgress.length > 0 ? (
-              project.categoryProgress.map((category) => (
-                <div key={category.key} className={styles.categoryProgressItem}>
-                  <div className={styles.categoryProgressHeader}>
-                    <div>
-                      <strong>{category.shortName}</strong>
-                      {category.fullName && category.fullName !== category.shortName && <span>{category.fullName}</span>}
-                    </div>
-                    <span>{category.percent}%</span>
-                  </div>
-                  <div className={styles.categoryProgressMeta}>
-                    {category.checked}/{category.total}
-                  </div>
-                  <div className={styles.categoryProgressLine}>
-                    <span style={{ width: `${category.percent}%` }} />
-                  </div>
-                </div>
-              ))
+        {expandedPhase && (
+          <div className={styles.phaseProgressPanel} onClick={(event) => event.stopPropagation()}>
+            {expandedPhase === 'final' && !project.creditProgress.final.hasData ? (
+              <div className={styles.emptyCategoryProgress}>No Final Submission data yet</div>
             ) : (
-              <div className={styles.emptyCategoryProgress}>No credit progress available</div>
+              <div className={styles.submissionProgressGrid}>
+                <section className={styles.submissionProgressColumn}>
+                  <h4>1st Submission</h4>
+                  {renderCategoryList(project.creditProgress[expandedPhase].first)}
+                </section>
+                <section className={styles.submissionProgressColumn}>
+                  <h4>2nd Submission</h4>
+                  {project.creditProgress[expandedPhase].secondStarted
+                    ? renderCategoryList(project.creditProgress[expandedPhase].second)
+                    : <div className={styles.emptyCategoryProgress}>2nd Submission not started</div>}
+                </section>
+              </div>
             )}
           </div>
         )}
 
         <div className={styles.cardMeta}>
-          <span>Pre {project.preChecked}/{project.preTotal}</span>
-          <span>Final {project.finalChecked}/{project.finalTotal}</span>
+          {expandedPhase && activeFirstTotals && activeSecondTotals ? (
+            <>
+              <span>
+                {expandedPhase === 'pre' ? 'Pre' : 'Final'} 1st: {activeFirstTotals.checked}/{activeFirstTotals.total}
+              </span>
+              <span>
+                {expandedPhase === 'pre' ? 'Pre' : 'Final'} 2nd: {activeSecondTotals.checked}/{activeSecondTotals.total}
+              </span>
+            </>
+          ) : (
+            <>
+              <span>Pre {project.preChecked}/{project.preTotal}</span>
+              <span>Final {project.finalChecked}/{project.finalTotal}</span>
+            </>
+          )}
         </div>
 
         {stageId === 'REVIEW' && (

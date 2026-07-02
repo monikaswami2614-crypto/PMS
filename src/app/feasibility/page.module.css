@@ -163,9 +163,16 @@
   box-shadow: 0 0 28px rgba(165, 243, 252, 0.14);
 }
 
+.summaryCertified {
+  border-color: rgba(52, 211, 153, 0.52);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.17), rgba(6, 95, 70, 0.08));
+  box-shadow: 0 0 24px rgba(52, 211, 153, 0.12);
+}
+
 .summaryGold::after,
 .summarySilver::after,
-.summaryPlatinum::after {
+.summaryPlatinum::after,
+.summaryCertified::after {
   content: '';
   position: absolute;
   inset: 0;

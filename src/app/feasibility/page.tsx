@@ -329,23 +329,37 @@ const getAvailablePoints = (row: string[], sheet: ChecklistSheet): number | null
   return Math.min(100, Number(value));
 };
 
-const getReviewCreditStatus = (
+const roundPoints = (value: number): number => Number(value.toFixed(2));
+
+const getReviewRequirementStatuses = (
   item: ReviewItem | undefined,
   phase: CertificationPhase,
   submissionRound: SubmissionRound,
   scopedStatuses: Record<string, RequirementStatus>,
-): 'checked' | 'missing' | 'pending' => {
-  if (!item) return 'missing';
+): RequirementStatus[] => {
+  if (!item) return [];
   const requirements = phase === 'pre' ? item.preRequirements : item.finalRequirements;
-  if (requirements.length === 0) return 'missing';
-  const statuses = requirements.map((requirement) => (
+  return requirements.map((requirement) => (
     scopedStatuses[requirement.id]
       ?? (submissionRound === 'first' ? requirement.status : 'pending')
   ));
+};
+
+const getReviewCreditPoints = (
+  item: ReviewItem | undefined,
+  phase: CertificationPhase,
+  submissionRound: SubmissionRound,
+  scopedStatuses: Record<string, RequirementStatus>,
+  availablePoints: number,
+): { achievable: number; doubtful: number } => {
+  const statuses = getReviewRequirementStatuses(item, phase, submissionRound, scopedStatuses);
+  if (statuses.length === 0) return { achievable: 0, doubtful: 0 };
   const fulfilledCount = statuses.filter((status) => status === 'checked' || status === 'overridden').length;
-  if (fulfilledCount === statuses.length) return 'checked';
-  if (statuses.some((status) => status === 'pending') || fulfilledCount > 0) return 'pending';
-  return 'missing';
+  const pendingCount = statuses.filter((status) => status === 'pending').length;
+  return {
+    achievable: roundPoints((availablePoints * fulfilledCount) / statuses.length),
+    doubtful: roundPoints((availablePoints * pendingCount) / statuses.length),
+  };
 };
 
 const clampAchievablePoints = (value: number, availablePoints: number): number => (
@@ -620,6 +634,7 @@ export default function FeasibilityPage() {
     } catch {
       window.localStorage.removeItem(getReviewResponseScopeStorageKey(currentScopeKey));
     }
+
     setHydratedScopeKey(currentScopeKey);
   }, [certificationPhase, checklistType, currentScopeKey, selectedProjectId, submissionRound]);
 
@@ -816,34 +831,208 @@ export default function FeasibilityPage() {
       ?? Array.from(reviewItemsByCreditKey.entries()).find(([key]) => key === rowCreditKey || key.endsWith(rowCreditKey))?.[1];
   };
 
+  const getRawRoundPoints = (
+    row: string[],
+    rowIndex: number,
+    sheet: ChecklistSheet,
+    round: SubmissionRound,
+    includeManualValues: boolean,
+  ): { achievable: number; doubtful: number } => {
+    const availablePoints = getAvailablePoints(row, sheet);
+    if (
+      !isCreditRow(row, rowIndex)
+      || isRequiredRow(row, sheet)
+      || availablePoints === null
+    ) return { achievable: 0, doubtful: 0 };
+
+    const scopeKey = getCertificationScopeKey(
+      selectedProjectId,
+      checklistType,
+      certificationPhase,
+      round,
+    );
+    const creditKey = getCreditKey(row);
+    const selectedForRound = selectedCredits[checklistType]?.[scopeKey] ?? {};
+    const roundIsAvailable = round === 'first'
+      || (secondSubmissionUnlocked && Boolean(selectedForRound[creditKey]));
+    if (!roundIsAvailable) return { achievable: 0, doubtful: 0 };
+
+    const statuses = workflowStatuses[scopeKey] ?? {};
+    const automaticPoints = getReviewCreditPoints(
+      getMatchedReviewItem(row),
+      certificationPhase,
+      round,
+      statuses,
+      availablePoints,
+    );
+    const manualAchievableForRound = manualAchievable[checklistType]?.[scopeKey]?.[creditKey];
+    const manualDoubtfulForRound = manualDoubtful[checklistType]?.[scopeKey]?.[creditKey];
+    const achievable = includeManualValues && typeof manualAchievableForRound === 'number'
+      ? clampAchievablePoints(manualAchievableForRound, availablePoints)
+      : automaticPoints.achievable;
+    const rawDoubtful = includeManualValues && typeof manualDoubtfulForRound === 'number'
+      ? clampAchievablePoints(manualDoubtfulForRound, availablePoints)
+      : automaticPoints.doubtful;
+
+    return {
+      achievable,
+      doubtful: Math.min(Math.max(0, availablePoints - achievable), rawDoubtful),
+    };
+  };
+
+  const getSecondSubmissionDelta = (
+    row: string[],
+    rowIndex: number,
+    sheet: ChecklistSheet,
+    includeManualValues: boolean,
+  ): { achievable: number; doubtful: number } => {
+    const availablePoints = getAvailablePoints(row, sheet) ?? 0;
+    const first = getRawRoundPoints(row, rowIndex, sheet, 'first', true);
+    const second = getRawRoundPoints(row, rowIndex, sheet, 'second', includeManualValues);
+    const creditKey = getCreditKey(row);
+    const secondSelected = selectedCredits[checklistType]?.[secondSubmissionScopeKey]?.[creditKey];
+    const matchedItem = getMatchedReviewItem(row);
+    const firstStatuses = getReviewRequirementStatuses(
+      matchedItem,
+      certificationPhase,
+      'first',
+      workflowStatuses[firstSubmissionScopeKey] ?? {},
+    );
+    const secondStatuses = getReviewRequirementStatuses(
+      matchedItem,
+      certificationPhase,
+      'second',
+      workflowStatuses[secondSubmissionScopeKey] ?? {},
+    );
+    const fulfilled = (status?: RequirementStatus) => status === 'checked' || status === 'overridden';
+    const unitPoints = firstStatuses.length > 0 ? availablePoints / firstStatuses.length : 0;
+    const automaticAchievable = secondSubmissionUnlocked && secondSelected
+      ? roundPoints(firstStatuses.reduce((total, firstStatus, index) => (
+        !fulfilled(firstStatus) && fulfilled(secondStatuses[index])
+          ? total + unitPoints
+          : total
+      ), 0))
+      : 0;
+    const automaticDoubtful = secondSubmissionUnlocked && secondSelected
+      ? roundPoints(firstStatuses.reduce((total, firstStatus, index) => (
+        !fulfilled(firstStatus) && secondStatuses[index] === 'pending'
+          ? total + unitPoints
+          : total
+      ), 0))
+      : 0;
+    const hasManualAchievable = includeManualValues
+      && typeof manualAchievable[checklistType]?.[secondSubmissionScopeKey]?.[creditKey] === 'number';
+    const hasManualDoubtful = includeManualValues
+      && typeof manualDoubtful[checklistType]?.[secondSubmissionScopeKey]?.[creditKey] === 'number';
+    const achievable = Math.min(
+      Math.max(0, availablePoints - first.achievable),
+      hasManualAchievable ? second.achievable : automaticAchievable,
+    );
+    const doubtful = Math.min(
+      Math.max(0, availablePoints - first.achievable - achievable),
+      hasManualDoubtful ? second.doubtful : automaticDoubtful,
+    );
+
+    return {
+      achievable: roundPoints(achievable),
+      doubtful: roundPoints(doubtful),
+    };
+  };
+
+  const getCombinedSubmissionPoints = (
+    row: string[],
+    rowIndex: number,
+    sheet: ChecklistSheet,
+    includeManualValues: boolean,
+  ): { achievable: number; doubtful: number } => {
+    const availablePoints = getAvailablePoints(row, sheet) ?? 0;
+    const first = getRawRoundPoints(row, rowIndex, sheet, 'first', includeManualValues);
+    const secondDelta = getSecondSubmissionDelta(row, rowIndex, sheet, includeManualValues);
+    const creditKey = getCreditKey(row);
+    const secondAvailable = secondSubmissionUnlocked
+      && Boolean(selectedCredits[checklistType]?.[secondSubmissionScopeKey]?.[creditKey]);
+    const matchedItem = getMatchedReviewItem(row);
+    const firstStatuses = getReviewRequirementStatuses(
+      matchedItem,
+      certificationPhase,
+      'first',
+      workflowStatuses[firstSubmissionScopeKey] ?? {},
+    );
+    const secondStatuses = getReviewRequirementStatuses(
+      matchedItem,
+      certificationPhase,
+      'second',
+      workflowStatuses[secondSubmissionScopeKey] ?? {},
+    );
+    const fulfilled = (status?: RequirementStatus) => status === 'checked' || status === 'overridden';
+    const unitPoints = firstStatuses.length > 0 ? availablePoints / firstStatuses.length : 0;
+    const hasManualAchievable = includeManualValues && (
+      typeof manualAchievable[checklistType]?.[firstSubmissionScopeKey]?.[creditKey] === 'number'
+      || typeof manualAchievable[checklistType]?.[secondSubmissionScopeKey]?.[creditKey] === 'number'
+    );
+    const hasManualDoubtful = includeManualValues && (
+      typeof manualDoubtful[checklistType]?.[firstSubmissionScopeKey]?.[creditKey] === 'number'
+      || typeof manualDoubtful[checklistType]?.[secondSubmissionScopeKey]?.[creditKey] === 'number'
+    );
+    const automaticAchievable = roundPoints(firstStatuses.reduce((total, firstStatus, index) => (
+      fulfilled(firstStatus) || (secondAvailable && fulfilled(secondStatuses[index]))
+        ? total + unitPoints
+        : total
+    ), 0));
+    const automaticDoubtful = roundPoints(firstStatuses.reduce((total, firstStatus, index) => {
+      if (fulfilled(firstStatus)) return total;
+      const finalStatus = secondAvailable ? secondStatuses[index] : firstStatus;
+      return finalStatus === 'pending' ? total + unitPoints : total;
+    }, 0));
+    const achievable = Math.min(
+      availablePoints,
+      hasManualAchievable ? first.achievable + secondDelta.achievable : automaticAchievable,
+    );
+    const doubtful = Math.min(
+      Math.max(0, availablePoints - achievable),
+      hasManualDoubtful ? first.doubtful + secondDelta.doubtful : automaticDoubtful,
+    );
+    return {
+      achievable: roundPoints(achievable),
+      doubtful: roundPoints(doubtful),
+    };
+  };
+
+  const getCountedPoints = (
+    row: string[],
+    rowIndex: number,
+    sheet: ChecklistSheet,
+    includeManualValues: boolean,
+  ): { achievable: number; doubtful: number } => {
+    if (ratingCountMode === 'first') {
+      return getRawRoundPoints(row, rowIndex, sheet, 'first', includeManualValues);
+    }
+    if (ratingCountMode === 'second') {
+      return getSecondSubmissionDelta(row, rowIndex, sheet, includeManualValues);
+    }
+    return getCombinedSubmissionPoints(row, rowIndex, sheet, includeManualValues);
+  };
+
   const getAutomaticAchievablePoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
     if (!isCreditRow(row, rowIndex)) return getCreditRowValue(row, sheet, 'achievable');
     if (isRequiredRow(row, sheet)) return 'Required';
 
     const availablePoints = getAvailablePoints(row, sheet);
     if (availablePoints === null) return getCreditRowValue(row, sheet, 'achievable');
-    if (!isCreditAvailableForCurrentSubmission(getCreditKey(row))) return '0';
-
-    const reviewStatus = getReviewCreditStatus(
-      getMatchedReviewItem(row),
-      certificationPhase,
-      submissionRound,
-      scopedWorkflowStatuses,
-    );
-    return reviewStatus === 'checked' ? String(availablePoints) : '0';
+    const points = submissionRound === 'second'
+      ? getSecondSubmissionDelta(row, rowIndex, sheet, false)
+      : getRawRoundPoints(row, rowIndex, sheet, 'first', false);
+    return String(points.achievable);
   };
 
   const getAchievablePoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
     const availablePoints = getAvailablePoints(row, sheet);
-    const manualValue = manualAchievableForProject[getCreditKey(row)];
-    if (
-      availablePoints !== null
-      && isCreditAvailableForCurrentSubmission(getCreditKey(row))
-      && typeof manualValue === 'number'
-    ) {
-      return String(clampAchievablePoints(manualValue, availablePoints));
+    if (!isCreditRow(row, rowIndex) || availablePoints === null) {
+      return getCreditRowValue(row, sheet, 'achievable');
     }
-    return getAutomaticAchievablePoints(row, rowIndex, sheet);
+    if (isRequiredRow(row, sheet)) return 'Required';
+    const points = getCountedPoints(row, rowIndex, sheet, true);
+    return String(points.achievable);
   };
 
   const getAutomaticDoubtfulPoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
@@ -852,28 +1041,20 @@ export default function FeasibilityPage() {
 
     const availablePoints = getAvailablePoints(row, sheet);
     if (availablePoints === null) return getCreditRowValue(row, sheet, 'doubtful');
-    if (!isCreditAvailableForCurrentSubmission(getCreditKey(row))) return '0';
-
-    const reviewStatus = getReviewCreditStatus(
-      getMatchedReviewItem(row),
-      certificationPhase,
-      submissionRound,
-      scopedWorkflowStatuses,
-    );
-    return reviewStatus === 'pending' ? String(availablePoints) : '0';
+    const points = submissionRound === 'second'
+      ? getSecondSubmissionDelta(row, rowIndex, sheet, false)
+      : getRawRoundPoints(row, rowIndex, sheet, 'first', false);
+    return String(points.doubtful);
   };
 
   const getDoubtfulPoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
     const availablePoints = getAvailablePoints(row, sheet);
-    const manualValue = manualDoubtfulForProject[getCreditKey(row)];
-    if (
-      availablePoints !== null
-      && isCreditAvailableForCurrentSubmission(getCreditKey(row))
-      && typeof manualValue === 'number'
-    ) {
-      return String(clampAchievablePoints(manualValue, availablePoints));
+    if (!isCreditRow(row, rowIndex) || availablePoints === null) {
+      return getCreditRowValue(row, sheet, 'doubtful');
     }
-    return getAutomaticDoubtfulPoints(row, rowIndex, sheet);
+    if (isRequiredRow(row, sheet)) return 'Required';
+    const points = getCountedPoints(row, rowIndex, sheet, true);
+    return String(points.doubtful);
   };
 
   const getNotTargetedPoints = (row: string[], rowIndex: number, sheet: ChecklistSheet): string => {
@@ -972,10 +1153,10 @@ export default function FeasibilityPage() {
         const achievablePoints = clampAchievablePoints(Number(getAchievablePoints(row, rowIndex, activeSheet)), availablePoints);
         const doubtfulPoints = clampAchievablePoints(Number(getDoubtfulPoints(row, rowIndex, activeSheet)), availablePoints);
         activeSectionTotals = {
-          available: activeSectionTotals.available + availablePoints,
-          achievable: activeSectionTotals.achievable + achievablePoints,
-          doubtful: activeSectionTotals.doubtful + doubtfulPoints,
-          notTargeted: activeSectionTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
+          available: roundPoints(activeSectionTotals.available + availablePoints),
+          achievable: roundPoints(activeSectionTotals.achievable + achievablePoints),
+          doubtful: roundPoints(activeSectionTotals.doubtful + doubtfulPoints),
+          notTargeted: roundPoints(activeSectionTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints)),
         };
         return;
       }
@@ -992,6 +1173,7 @@ export default function FeasibilityPage() {
     certificationPhase,
     manualAchievableForProject,
     manualDoubtfulForProject,
+    ratingCountMode,
     reviewItemsByCreditKey,
     scopedWorkflowStatuses,
     submissionRound,
@@ -1013,10 +1195,10 @@ export default function FeasibilityPage() {
         availablePoints,
       );
       return {
-        available: nextTotals.available + availablePoints,
-        achievable: nextTotals.achievable + achievablePoints,
-        doubtful: nextTotals.doubtful + doubtfulPoints,
-        notTargeted: nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
+        available: roundPoints(nextTotals.available + availablePoints),
+        achievable: roundPoints(nextTotals.achievable + achievablePoints),
+        doubtful: roundPoints(nextTotals.doubtful + doubtfulPoints),
+        notTargeted: roundPoints(nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints)),
       };
     }, { available: 0, achievable: 0, doubtful: 0, notTargeted: 0 });
 
@@ -1025,15 +1207,16 @@ export default function FeasibilityPage() {
     const doubtful = Math.min(available - achievable, totals.doubtful);
     return {
       available,
-      achievable,
-      doubtful,
-      notTargeted: Math.max(0, available - achievable - doubtful),
+      achievable: roundPoints(achievable),
+      doubtful: roundPoints(doubtful),
+      notTargeted: roundPoints(Math.max(0, available - achievable - doubtful)),
     };
   }, [
     activeSheet,
     certificationPhase,
     manualAchievableForProject,
     manualDoubtfulForProject,
+    ratingCountMode,
     reviewItemsByCreditKey,
     scopedWorkflowStatuses,
     secondSubmissionUnlocked,
@@ -1041,96 +1224,66 @@ export default function FeasibilityPage() {
     submissionRound,
   ]);
 
-  const summary = useMemo(() => {
+  const summary = (() => {
     const emptySummary = { available: 0, achievable: 0, doubtful: 0, notTargeted: 0, selected: 0 };
     if (!activeSheet || !selectedProjectId) return emptySummary;
 
-    const calculateRound = (round: SubmissionRound) => {
-      const scopeKey = getCertificationScopeKey(selectedProjectId, checklistType, certificationPhase, round);
-      const statuses = workflowStatuses[scopeKey] ?? {};
-      const selectedForRound = selectedCredits[checklistType]?.[scopeKey] ?? {};
-      const manualAchievableForRound = manualAchievable[checklistType]?.[scopeKey] ?? {};
-      const manualDoubtfulForRound = manualDoubtful[checklistType]?.[scopeKey] ?? {};
+    const firstSelected = selectedCredits[checklistType]?.[firstSubmissionScopeKey] ?? {};
+    const secondSelected = selectedCredits[checklistType]?.[secondSubmissionScopeKey] ?? {};
 
-      const totals = activeSheet.rows.reduce((nextTotals, row, rowIndex) => {
-        if (!isCreditRow(row, rowIndex) || isRequiredRow(row, activeSheet)) return nextTotals;
-        const availablePoints = getAvailablePoints(row, activeSheet);
-        if (availablePoints === null) return nextTotals;
+    return activeSheet.rows.reduce((totals, row, rowIndex) => {
+      if (!isCreditRow(row, rowIndex) || isRequiredRow(row, activeSheet)) return totals;
+      const availablePoints = getAvailablePoints(row, activeSheet);
+      if (availablePoints === null) return totals;
 
-        const creditKey = getCreditKey(row);
-        const roundIsAvailable = round === 'first'
-          || (secondSubmissionUnlocked && Boolean(selectedForRound[creditKey]));
-        const reviewStatus = roundIsAvailable
-          ? getReviewCreditStatus(getMatchedReviewItem(row), certificationPhase, round, statuses)
-          : 'missing';
-        const manualTargeted = manualAchievableForRound[creditKey];
-        const manualDoubtfulValue = manualDoubtfulForRound[creditKey];
-        const achievablePoints = roundIsAvailable && typeof manualTargeted === 'number'
-          ? clampAchievablePoints(manualTargeted, availablePoints)
-          : reviewStatus === 'checked' ? availablePoints : 0;
-        const doubtfulPoints = roundIsAvailable && typeof manualDoubtfulValue === 'number'
-          ? clampAchievablePoints(manualDoubtfulValue, availablePoints)
-          : reviewStatus === 'pending' ? availablePoints : 0;
+      const creditKey = getCreditKey(row);
+      const first = getRawRoundPoints(row, rowIndex, activeSheet, 'first', true);
+      const secondDelta = getSecondSubmissionDelta(row, rowIndex, activeSheet, true);
+      const combined = getCombinedSubmissionPoints(row, rowIndex, activeSheet, true);
 
-        return {
-          available: nextTotals.available + availablePoints,
-          achievable: nextTotals.achievable + achievablePoints,
-          doubtful: nextTotals.doubtful + doubtfulPoints,
-          notTargeted: nextTotals.notTargeted + Math.max(0, availablePoints - achievablePoints - doubtfulPoints),
-          selected: nextTotals.selected + (selectedForRound[creditKey] ? 1 : 0),
-        };
-      }, { ...emptySummary });
+      const points = ratingCountMode === 'first'
+        ? first
+        : ratingCountMode === 'second'
+          ? secondDelta
+          : combined;
+      const selected = ratingCountMode === 'first'
+        ? Boolean(firstSelected[creditKey])
+        : ratingCountMode === 'second'
+          ? Boolean(secondSelected[creditKey])
+          : Boolean(firstSelected[creditKey] || secondSelected[creditKey]);
 
-      const cappedAvailable = Math.min(100, totals.available);
-      const cappedAchievable = Math.min(cappedAvailable, totals.achievable);
-      const cappedDoubtful = Math.min(cappedAvailable - cappedAchievable, totals.doubtful);
       return {
-        ...totals,
-        available: cappedAvailable,
-        achievable: cappedAchievable,
-        doubtful: cappedDoubtful,
-        notTargeted: Math.max(0, cappedAvailable - cappedAchievable - cappedDoubtful),
+        available: roundPoints(totals.available + availablePoints),
+        achievable: roundPoints(totals.achievable + points.achievable),
+        doubtful: roundPoints(totals.doubtful + points.doubtful),
+        notTargeted: roundPoints(totals.notTargeted + Math.max(
+          0,
+          availablePoints - points.achievable - points.doubtful,
+        )),
+        selected: totals.selected + (selected ? 1 : 0),
       };
-    };
-
-    const firstSummary = calculateRound('first');
-    const secondSummary = calculateRound('second');
-    if (ratingCountMode === 'first') return firstSummary;
-    if (ratingCountMode === 'second') return secondSummary;
-    return {
-      available: firstSummary.available + secondSummary.available,
-      achievable: firstSummary.achievable + secondSummary.achievable,
-      doubtful: firstSummary.doubtful + secondSummary.doubtful,
-      notTargeted: firstSummary.notTargeted + secondSummary.notTargeted,
-      selected: firstSummary.selected + secondSummary.selected,
-    };
-  }, [
-    activeSheet,
-    certificationPhase,
-    checklistType,
-    manualAchievable,
-    manualDoubtful,
-    ratingCountMode,
-    reviewItemsByCreditKey,
-    secondSubmissionUnlocked,
-    selectedCredits,
-    selectedProjectId,
-    workflowStatuses,
-  ]);
-  const rating = getRating(summary.achievable);
+    }, { ...emptySummary });
+  })();
+  const rating = ratingCountMode === 'combined' && secondSubmissionUnlocked
+    ? getRating(summary.achievable)
+    : ratingCountMode === 'first'
+      ? 'Waiting for IGBC Review'
+      : 'Not Final';
   const ratingStyle = rating === 'Gold'
     ? styles.summaryGold
     : rating === 'Silver'
       ? styles.summarySilver
       : rating === 'Platinum'
         ? styles.summaryPlatinum
-        : '';
+        : rating === 'Certified'
+          ? styles.summaryCertified
+          : '';
 
   const toggleAllCredits = () => {
     if (activeCreditKeys.length === 0 || !selectedProjectId) return;
     if (currentSubmissionLocked || submissionRound === 'second') {
       setUploadMessage(submissionRound === 'second' && !secondSubmissionUnlocked
-        ? 'Please upload review response file first to start 2nd submission.'
+        ? 'Upload IGBC Review Response to start 2nd Submission.'
         : submissionRound === 'second'
           ? '2nd Submission credits are selected from the uploaded review response.'
           : '1st Submission is complete and frozen.');
@@ -1153,9 +1306,16 @@ export default function FeasibilityPage() {
     if (availablePoints === null) return;
 
     const creditKey = getCreditKey(row);
-    const nextValue = clampAchievablePoints(Number(value), availablePoints);
+    const rowIndex = activeSheet.rows.indexOf(row);
+    const firstAchievable = submissionRound === 'second'
+      ? getRawRoundPoints(row, rowIndex, activeSheet, 'first', true).achievable
+      : 0;
+    const nextValue = clampAchievablePoints(
+      Number(value),
+      Math.max(0, availablePoints - firstAchievable),
+    );
     const automaticValue = clampAchievablePoints(
-      Number(getAutomaticAchievablePoints(row, activeSheet.rows.indexOf(row), activeSheet)),
+      Number(getAutomaticAchievablePoints(row, rowIndex, activeSheet)),
       availablePoints,
     );
     setManualAchievable((current) => {
@@ -1177,9 +1337,19 @@ export default function FeasibilityPage() {
     if (availablePoints === null) return;
 
     const creditKey = getCreditKey(row);
-    const nextValue = clampAchievablePoints(Number(value), availablePoints);
+    const rowIndex = activeSheet.rows.indexOf(row);
+    const firstPoints = submissionRound === 'second'
+      ? getRawRoundPoints(row, rowIndex, activeSheet, 'first', true)
+      : { achievable: 0, doubtful: 0 };
+    const secondAchievable = submissionRound === 'second'
+      ? getSecondSubmissionDelta(row, rowIndex, activeSheet, true).achievable
+      : 0;
+    const nextValue = clampAchievablePoints(
+      Number(value),
+      Math.max(0, availablePoints - firstPoints.achievable - secondAchievable),
+    );
     const automaticValue = clampAchievablePoints(
-      Number(getAutomaticDoubtfulPoints(row, activeSheet.rows.indexOf(row), activeSheet)),
+      Number(getAutomaticDoubtfulPoints(row, rowIndex, activeSheet)),
       availablePoints,
     );
     setManualDoubtful((current) => {
@@ -1391,7 +1561,13 @@ export default function FeasibilityPage() {
           <select
             className={`${styles.projectSelect} ${styles.workflowSelect}`}
             value={submissionRound}
-            onChange={(event) => setSubmissionRound(event.target.value as SubmissionRound)}
+            onChange={(event) => {
+              const nextRound = event.target.value as SubmissionRound;
+              setSubmissionRound(nextRound);
+              if (nextRound === 'second' && !secondSubmissionUnlocked) {
+                setUploadMessage('Upload IGBC Review Response to start 2nd Submission.');
+              }
+            }}
             aria-label="Select submission round"
           >
             <option value="first">First Submission</option>
@@ -1430,7 +1606,13 @@ export default function FeasibilityPage() {
         <select
           className={styles.ratingCountSelect}
           value={ratingCountMode}
-          onChange={(event) => setRatingCountMode(event.target.value as RatingCountMode)}
+          onChange={(event) => {
+            const nextMode = event.target.value as RatingCountMode;
+            setRatingCountMode(nextMode);
+            if (nextMode === 'second' && !secondSubmissionUnlocked) {
+              setUploadMessage('Upload IGBC Review Response to start 2nd Submission.');
+            }
+          }}
           aria-label="Select submission count"
         >
           <option value="first">1st Submission Count</option>
@@ -1565,7 +1747,7 @@ export default function FeasibilityPage() {
                               event.preventDefault();
                               setUploadMessage(
                                 submissionRound === 'second' && !secondSubmissionUnlocked
-                                  ? 'Please upload review response file first to start 2nd submission.'
+                                  ? 'Upload IGBC Review Response to start 2nd Submission.'
                                   : submissionRound === 'second'
                                     ? '2nd Submission credits are selected from the uploaded review response.'
                                     : '1st Submission is complete and frozen.',
@@ -1621,6 +1803,7 @@ export default function FeasibilityPage() {
                           : cell;
                         const creditCanBeEdited = isCredit
                           && !currentSubmissionLocked
+                          && ratingCountMode === submissionRound
                           && isCreditAvailableForCurrentSubmission(getCreditKey(row));
                         const canEditAchievable = creditCanBeEdited && !requiredRow && availablePoints !== null && cellIndex === pointColumns.achievable;
                         const canEditDoubtful = creditCanBeEdited && !requiredRow && availablePoints !== null && cellIndex === pointColumns.doubtful;

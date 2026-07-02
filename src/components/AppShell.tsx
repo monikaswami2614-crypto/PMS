@@ -37,7 +37,7 @@ const AppContent = ({ children }: Readonly<{ children: React.ReactNode }>) => {
   }, [setSelectedProject, setSourceFilter]);
 
   useEffect(() => {
-    if (pathname === '/') {
+    if (pathname === '/' || pathname === '/calendar') {
       setSelectedProject('all');
       setSourceFilter(null);
     }

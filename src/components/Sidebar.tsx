@@ -44,11 +44,11 @@ export const Sidebar: React.FC = () => {
 
   const menuItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Project Progress', path: '/board', icon: KanbanSquare },
     { name: 'All Project List', path: '/tasks', icon: ListTodo },
-    { name: 'Feasibility', path: '/feasibility', icon: BadgeCheck },
-    { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
+    { name: 'Project Progress', path: '/board', icon: KanbanSquare },
     { name: 'Checklist Review', path: '/checklist-review', icon: ClipboardCheck },
+    { name: 'Data Filtration', path: '/certification-filtration', icon: SlidersHorizontal },
+    { name: 'Feasibility', path: '/feasibility', icon: BadgeCheck },
     { name: 'Calendar', path: '/calendar', icon: Calendar },
     { name: 'Team Members', path: '/team', icon: Users },
   ];

@@ -177,6 +177,61 @@
   box-shadow: none;
 }
 
+.ratingCertified {
+  --rating-rgb: 16, 185, 129;
+}
+
+.ratingSilver {
+  --rating-rgb: 203, 213, 225;
+}
+
+.ratingGold {
+  --rating-rgb: 234, 179, 8;
+}
+
+.ratingPlatinum {
+  --rating-rgb: 103, 232, 249;
+}
+
+.ratingCertified,
+.ratingSilver,
+.ratingGold,
+.ratingPlatinum {
+  border-color: rgba(var(--rating-rgb), 0.52);
+  background:
+    linear-gradient(180deg, rgba(var(--rating-rgb), 0.1), rgba(var(--rating-rgb), 0.025)),
+    var(--board-card-bg);
+  box-shadow: 0 0 22px rgba(var(--rating-rgb), 0.1);
+}
+
+.staticCard.ratingCertified:hover,
+.staticCard.ratingSilver:hover,
+.staticCard.ratingGold:hover,
+.staticCard.ratingPlatinum:hover {
+  border-color: rgba(var(--rating-rgb), 0.52);
+  box-shadow: 0 0 22px rgba(var(--rating-rgb), 0.1);
+}
+
+.ratingCertified .progressLine span,
+.ratingSilver .progressLine span,
+.ratingGold .progressLine span,
+.ratingPlatinum .progressLine span,
+.ratingCertified .categoryProgressLine span,
+.ratingSilver .categoryProgressLine span,
+.ratingGold .categoryProgressLine span,
+.ratingPlatinum .categoryProgressLine span {
+  background: linear-gradient(90deg, rgba(var(--rating-rgb), 0.72), rgb(var(--rating-rgb)));
+}
+
+.ratingCertified .projectTypeBadge,
+.ratingSilver .projectTypeBadge,
+.ratingGold .projectTypeBadge,
+.ratingPlatinum .projectTypeBadge {
+  color: rgb(var(--rating-rgb));
+  border-color: rgba(var(--rating-rgb), 0.38);
+  background: rgba(var(--rating-rgb), 0.12);
+}
+
 .projectCardHeader {
   display: flex;
   align-items: center;
@@ -271,6 +326,19 @@
   font-weight: 900;
 }
 
+.creditProgressTabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.activeProgressTab {
+  color: var(--text-primary);
+  border-color: rgba(139, 92, 246, 0.48);
+  background: rgba(124, 58, 237, 0.16);
+}
+
 .creditProgressToggle:hover {
   color: var(--text-primary);
   border-color: var(--border-color-hover);
@@ -283,6 +351,37 @@
 
 .toggleIconOpen {
   transform: rotate(180deg);
+}
+
+.phaseProgressPanel {
+  padding: 10px;
+  border: 1px solid rgba(var(--contrast-surface-rgb), 0.08);
+  border-radius: var(--border-radius-sm);
+  background: var(--board-detail-bg);
+}
+
+.submissionProgressGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.submissionProgressColumn {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.submissionProgressColumn h4 {
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.submissionProgressColumn .categoryProgressList {
+  height: 100%;
+  padding: 8px;
 }
 
 .categoryProgressList {
@@ -592,6 +691,10 @@
   .cardMeta {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  .submissionProgressGrid {
+    grid-template-columns: 1fr;
   }
 
   .checkedTree {

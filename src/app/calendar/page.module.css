@@ -390,8 +390,29 @@
   width: min(760px, 100%);
   max-height: 92vh;
   overflow: hidden;
+  border: 1px solid transparent;
   border-radius: var(--border-radius-lg);
   background: var(--bg-secondary);
+}
+
+.priorityModal {
+  border-color: color-mix(in srgb, var(--deadline-priority-color) 62%, transparent);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.42),
+    0 0 28px color-mix(in srgb, var(--deadline-priority-color) 20%, transparent);
+}
+
+.priorityModal .modalHeader {
+  border-bottom-color: color-mix(in srgb, var(--deadline-priority-color) 32%, var(--border-color));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--deadline-priority-color) 18%, transparent),
+    transparent 68%
+  );
+}
+
+.priorityModal .modalHeader h2 {
+  text-shadow: 0 0 18px color-mix(in srgb, var(--deadline-priority-color) 35%, transparent);
 }
 
 .modalHeader {
